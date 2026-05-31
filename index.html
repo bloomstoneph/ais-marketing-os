@@ -620,12 +620,6 @@ tbody tr:hover{background:rgba(255,255,255,.03)}
   </nav>
 
   <div class="sb-bottom">
-    <div class="sb-sync">Synced: <span id="last-synced">—</span></div>
-    <div class="sb-item" onclick="manualSync()">
-      <div class="sb-item-icon"><svg viewBox="0 0 24 24"><polyline points="23 4 23 10 17 10"/><polyline points="1 20 1 14 7 14"/><path d="M3.51 9a9 9 0 0114.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0020.49 15"/></svg></div>
-      <span class="sb-label">Sync Now</span>
-      <div class="sb-tooltip">Sync Now</div>
-    </div>
     <div class="sb-item" data-view="admin" onclick="nav('admin')">
       <div class="sb-item-bar" style="background:#64748B"></div>
       <div class="sb-item-icon"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M19.07 4.93a10 10 0 010 14.14M4.93 4.93a10 10 0 000 14.14"/></svg></div>
@@ -1068,13 +1062,9 @@ tbody tr:hover{background:rgba(255,255,255,.03)}
             </div>
             <div class="fhint">Your deployed Web App URL — connects the app to Google Sheets.</div>
           </div>
-          <div style="display:flex;gap:8px;margin-bottom:20px;flex-wrap:wrap">
-            <button class="btn btn-primary" style="display:flex;align-items:center;gap:6px" onclick="pullFromSheets()">
-              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width:14px;height:14px"><polyline points="1 4 1 10 7 10"/><path d="M3.51 15a9 9 0 1 0 .49-3.62"/></svg>
-              Pull from Sheets
-            </button>
-            <button class="btn btn-outline" onclick="manualSync()">Test Connection</button>
-            <span style="font-size:11px;color:var(--ct);align-self:center">Last sync: <span id="last-synced">—</span></span>
+          <div style="display:flex;gap:8px;margin-bottom:20px;align-items:center;flex-wrap:wrap">
+            <button class="btn btn-outline btn-sm" onclick="manualSync()">Test Connection</button>
+            <span style="font-size:11px;color:var(--ct)">Auto-syncs every 30s · Last: <span id="last-synced">—</span></span>
           </div>
           <div class="fg">
             <label class="fl">Accent Colour</label>
