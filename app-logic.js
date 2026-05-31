@@ -22,8 +22,19 @@ const DB = {
   Tasks: [], Subtasks: [], Task_Comments: [], Campaigns: [],
   Leave_Requests: [], Missions: [], Comp_Days: [], Events: [],
   Shoots: [], Media_Assets: [], Content: [], Meetings: [],
-  Meeting_Actions: [], Departments: [], Members: [], Enrollment: [], Social_Metrics: []
+  Meeting_Actions: [], Departments: [], Members: [], Enrollment: [], Social_Metrics: [],
+  iCal_Feeds: [], Member_Goals: [],
 };
+
+const GOAL_LABELS = {
+  tasks_completed:    'Tasks Completed',
+  shoots_completed:   'Shoots Wrapped',
+  posts_published:    'Posts Published',
+  campaigns_launched: 'Campaigns Launched',
+};
+
+const ICAL_PROXY = 'https://api.allorigins.win/raw?url=';
+let iCalCache = {};
 
 let currentView      = 'dashboard';
 let currentDashView  = 'team';
@@ -81,6 +92,9 @@ window.addEventListener('DOMContentLoaded', () => {
 
   // Restore offline queue
   pendingQueue = JSON.parse(localStorage.getItem(CONFIG.LS_QUEUE) || '[]');
+
+  // Load cached iCal events
+  try { iCalCache = JSON.parse(localStorage.getItem('ais_ical') || '{}'); } catch(e) {}
 
   // Dashboard date
   const dateEl = document.getElementById('dash-date');
@@ -536,6 +550,13 @@ function renderDashboard() {
       }).join('')
     : '<div style="color:var(--ct);font-size:13px;padding:16px 0;text-align:center">No upcoming events</div>';
 
+  // My Goals (only in My Work view)
+  const goalsCard = document.getElementById('dash-goals-card');
+  if (goalsCard) {
+    goalsCard.style.display = currentDashView === 'my' ? '' : 'none';
+    if (currentDashView === 'my') renderMyGoals();
+  }
+
   // Active campaigns
   const camps = DB.Campaigns.filter(c => c.status === 'active').slice(0, 4);
   const dashCamps = document.getElementById('dash-campaigns');
@@ -583,6 +604,13 @@ function renderCalendar() {
   const today       = new Date();
 
   // Build event list respecting filters
+  const icalEvs = DB.iCal_Feeds
+    .filter(f => f.enabled !== 'false' && f.enabled !== false)
+    .flatMap(f => (iCalCache[f.id] || []).map(ev => ({
+      ...ev, date: ev.start, _type:'ical', _color: f.color || '#6366F1',
+      title: ev.title || 'Event', _feed: f.name,
+    })));
+
   const allEvents = [
     ...DB.Events.map(e => ({ ...e, _type:'event', _color:'#64748B' })),
     ...DB.Tasks.filter(t => t.due_date).map(t => ({ id:t.id, title:t.title, date:t.due_date, _type:'task', _color:'#3B82F6' })),
@@ -590,6 +618,7 @@ function renderCalendar() {
     ...(calFilters.leave    ? DB.Leave_Requests.map(r => ({...r, date:r.start_date, _type:'leave',   _color:'#22C55E', title:(r.member_name||'?')+' - Leave' })) : []),
     ...(calFilters.mission  ? DB.Missions.map(r => ({...r, date:r.mission_date,     _type:'mission', _color:'#F59E0B', title:(r.member_name||'?')+' - '+r.title })) : []),
     ...(calFilters.dayoff   ? DB.Comp_Days.map(r => ({...r, date:r.comp_date,       _type:'dayoff',  _color:'#3B82F6', title:(r.member_name||'?')+' - Day Off' })) : []),
+    ...icalEvs,
   ];
 
   let html = '';
@@ -869,44 +898,110 @@ function renderCampaigns() {
 }
 
 // ─── MEDIA ────────────────────────────────────────────────────────────────────
-function renderMedia() {
-  // Shoots
-  const shootsEl = document.getElementById('shoots-body');
-  if (shootsEl) shootsEl.innerHTML = DB.Shoots.length
-    ? DB.Shoots.map(s => `<tr onclick="openEdit('Shoots','${s.id}')">
-        <td style="font-weight:600">${s.title}</td>
-        <td>${fmtDate(s.date)}</td>
-        <td>${s.campus||'—'}</td>
-        <td>${s.director||'—'}</td>
-        <td>${pill(s.status||'scheduled')}</td>
-        <td>${delBtn('Shoots',s.id)}</td>
-      </tr>`).join('')
-    : '<tr><td colspan="6" class="t-empty">No shoots scheduled</td></tr>';
+function openPoolAdd() { openAdd(mediaPoolTab === 'shoots' ? 'Shoots' : 'Media_Assets'); }
 
-  // Pool
-  const poolEl = document.getElementById('pool-body');
-  if (poolEl) {
+function renderMedia() {
+  const isShootsTab = mediaPoolTab === 'shoots';
+  const shootsWrap  = document.getElementById('media-shoots-wrap');
+  const poolWrap    = document.getElementById('media-pool-wrap');
+  if (shootsWrap) shootsWrap.style.display = isShootsTab ? '' : 'none';
+  if (poolWrap)   poolWrap.style.display   = isShootsTab ? 'none' : '';
+
+  if (isShootsTab) {
+    const el = document.getElementById('shoots-list');
+    if (!el) return;
+    const shoots = [...DB.Shoots].sort((a,b) => (a.date||'').localeCompare(b.date||''));
+    if (!shoots.length) { el.innerHTML = emptyState('No shoots yet — click + Schedule Shoot'); return; }
+
+    const SC = { scheduled:'#3B82F6', in_progress:'#F59E0B', wrapped:'#22C55E', cancelled:'#6B7280' };
+    el.innerHTML = shoots.map(s => {
+      const col    = SC[s.status||'scheduled'] || '#3B82F6';
+      const assets = DB.Media_Assets.filter(a => a.shoot_id === s.id);
+      const isWrap = s.status === 'wrapped';
+      return `<div class="shoot-card" onclick="openEdit('Shoots','${s.id}')">
+        <div class="shoot-bar" style="background:${col}"></div>
+        <div class="shoot-body">
+          <div class="shoot-row">
+            <div>
+              <div class="shoot-title">🎬 ${esc(s.title)}</div>
+              <div class="shoot-meta">
+                ${fmtDate(s.date)}${s.start_time?` · ${s.start_time}–${s.end_time||'?'}`:''}${s.campus?` · ${s.campus}`:''}${s.director?` · ${s.director.split(' ')[0]}`:''}${s.location?` · 📍${esc(s.location)}`:''}
+              </div>
+              ${assets.length ? `<div style="font-size:10px;color:var(--accent);margin-top:3px">📦 ${assets.length} asset${assets.length!==1?'s':''} in pool</div>` : ''}
+            </div>
+            <div style="display:flex;align-items:center;gap:8px;flex-shrink:0">
+              ${pill(s.status||'scheduled')}
+              ${isWrap ? `<button class="btn btn-sm btn-primary" onclick="event.stopPropagation();openLogProduction('${s.id}')">📝 Log Assets</button>` : ''}
+              ${delBtn('Shoots', s.id)}
+            </div>
+          </div>
+        </div>
+      </div>`;
+    }).join('');
+
+  } else {
+    // Content Pool
+    const TYPE_ICONS = { video:'🎥', photo:'📸', reel:'🎬', broll:'🎞️', story:'📱', graphic:'🎨' };
     const assets = DB.Media_Assets.filter(a => {
-      if (a.status==='posted'||a.status==='archived') return false;
+      if (a.status === 'posted' || a.status === 'archived') return false;
       if (mediaPoolFilter !== 'all' && a.status !== mediaPoolFilter) return false;
       return true;
     });
-    poolEl.innerHTML = assets.length
-      ? assets.map(a => {
-          const days = a.created_at ? Math.floor((Date.now()-new Date(a.created_at))/86400000) : 0;
-          const ageStyle = days>14 ? 'color:var(--red)' : days>7 ? 'color:var(--amber)' : '';
-          return `<tr onclick="openEdit('Media_Assets','${a.id}')">
-            <td style="font-weight:600">${a.title}</td>
-            <td>${a.type||'—'}</td>
-            <td>${a.campus||'—'}</td>
-            <td>${a.platform||'—'}</td>
-            <td>${pill(a.status)}</td>
-            <td style="${ageStyle}">${days}d</td>
-            <td>${delBtn('Media_Assets',a.id)}</td>
-          </tr>`;
-        }).join('')
-      : '<tr><td colspan="7" class="t-empty">Content pool is empty</td></tr>';
+    const el = document.getElementById('pool-grid');
+    if (!el) return;
+    if (!assets.length) { el.innerHTML = emptyState('Content pool is empty'); return; }
+
+    el.innerHTML = assets.map(a => {
+      const days     = a.created_at ? Math.floor((Date.now()-new Date(a.created_at))/86400000) : 0;
+      const ageColor = days > 14 ? 'var(--red)' : days > 7 ? 'var(--amber)' : 'var(--ct)';
+      const isReady  = a.status === 'ready';
+      return `<div class="pool-card" onclick="openEdit('Media_Assets','${a.id}')">
+        <div class="pool-top">
+          <span class="pool-type">${TYPE_ICONS[a.type||'video']||'📦'} ${a.type||'—'}</span>
+          ${pill(a.status)}
+        </div>
+        <div class="pool-title">${esc(a.title)}</div>
+        <div class="pool-badges">
+          ${a.campus   ? `<span class="pool-badge">${a.campus}</span>` : ''}
+          ${a.platform ? `<span class="pool-badge">${a.platform}</span>` : ''}
+        </div>
+        <div class="pool-foot">
+          <span style="font-size:10px;font-weight:600;color:${ageColor}">${days}d in pool</span>
+          <div style="display:flex;gap:4px">
+            ${isReady ? `<button class="btn btn-sm btn-primary" onclick="event.stopPropagation();markAsPosted('${a.id}')">✓ Post</button>` : ''}
+            ${delBtn('Media_Assets', a.id)}
+          </div>
+        </div>
+      </div>`;
+    }).join('');
   }
+}
+
+async function markAsPosted(assetId) {
+  await dbUpdate('Media_Assets', assetId, {
+    status: 'posted',
+    posted_at: new Date().toISOString().slice(0,10),
+  });
+  toast('Marked as posted ✓', 'success');
+}
+
+function openLogProduction(shootId) {
+  const s = DB.Shoots.find(x => x.id === shootId);
+  if (!s) return;
+  drawerEntity = '_ProdLog';
+  drawerItem   = { _id: shootId };
+  document.getElementById('dr-title').textContent = `📝 Log: ${truncate(s.title,28)}`;
+  document.getElementById('dr-body').innerHTML = `
+    <div style="color:var(--ct);font-size:12px;margin-bottom:14px">Assets will be added to Content Pool with status <b>raw</b>.</div>
+    <div class="fr">
+      <div class="fg"><label class="fl">🎥 Videos</label><input class="fi" type="number" min="0" name="videos" value="0"/></div>
+      <div class="fg"><label class="fl">📸 Photos</label><input class="fi" type="number" min="0" name="photos" value="0"/></div>
+    </div>
+    <div class="fr">
+      <div class="fg"><label class="fl">🎬 Reels</label><input class="fi" type="number" min="0" name="reels" value="0"/></div>
+      <div class="fg"><label class="fl">🎞️ B-Roll</label><input class="fi" type="number" min="0" name="broll" value="0"/></div>
+    </div>`;
+  openDrawer();
 }
 
 // ─── SOCIAL ───────────────────────────────────────────────────────────────────
@@ -1326,6 +1421,164 @@ async function addTaskComment(taskId) {
   if (input) input.value = '';
 }
 
+// ─── MEMBER GOALS ─────────────────────────────────────────────────────────────
+function calcGoalProgress(goal) {
+  const m = goal.member_name || '';
+  const s = goal.period_start || '';
+  const e = goal.period_end   || '9999-12-31';
+  switch (goal.goal_type) {
+    case 'tasks_completed':
+      return DB.Tasks.filter(t => t.assignee_name === m && t.status === 'done').length;
+    case 'shoots_completed':
+      return DB.Shoots.filter(x => x.director === m && x.status === 'wrapped' && (x.date||'') >= s && (x.date||'') <= e).length;
+    case 'posts_published':
+      return DB.Media_Assets.filter(a => a.status === 'posted' && (a.posted_at||a.created_at||'').slice(0,10) >= s).length;
+    case 'campaigns_launched':
+      return DB.Campaigns.filter(c => c.status === 'active' && (c.start_date||'') >= s && (c.start_date||'') <= e).length;
+    default:
+      return parseInt(goal.current_value || '0');
+  }
+}
+
+function renderGoals() {
+  const el = document.getElementById('admin-goals');
+  if (!el) return;
+  if (!DB.Member_Goals.length) {
+    el.innerHTML = '<div style="color:var(--ct);padding:16px;font-size:13px">No goals set yet — click + Add Goal to start</div>';
+    return;
+  }
+  const byMember = {};
+  DB.Member_Goals.forEach(g => { (byMember[g.member_name] = byMember[g.member_name] || []).push(g); });
+  el.innerHTML = Object.entries(byMember).map(([name, goals]) => `
+    <div style="margin-bottom:14px">
+      <div style="display:flex;align-items:center;gap:8px;padding:4px 0 8px">
+        ${av(name,'sm')}
+        <span style="font-size:12px;font-weight:700">${name}</span>
+      </div>
+      ${goals.map(g => {
+        const cur = calcGoalProgress(g);
+        const tgt = Math.max(1, parseInt(g.target_value) || 1);
+        const pct = Math.min(100, Math.round(cur / tgt * 100));
+        const bc  = pct >= 80 ? 'var(--green)' : pct >= 50 ? 'var(--accent)' : 'var(--amber)';
+        return `<div class="goal-row">
+          <div class="goal-info">
+            <div class="goal-name">${GOAL_LABELS[g.goal_type]||g.goal_type} · ${g.period||'monthly'}</div>
+            <div class="goal-bar-wrap"><div class="goal-bar" style="width:${pct}%;background:${bc}"></div></div>
+          </div>
+          <span class="goal-pct">${cur}/${tgt}</span>
+          <button class="btn btn-xs btn-outline" onclick="openEdit('Member_Goals','${g.id}')">✏</button>
+          ${delBtn('Member_Goals', g.id)}
+        </div>`;
+      }).join('')}
+    </div>`).join('');
+}
+
+function renderMyGoals() {
+  const el = document.getElementById('my-goals');
+  if (!el) return;
+  const user = localStorage.getItem('ais_current_user') || '';
+  if (!user) { el.innerHTML = '<div style="color:var(--ct);font-size:12px;padding:6px 0">Set your name in Admin → Settings to see goals.</div>'; return; }
+  const myGoals = DB.Member_Goals.filter(g => g.member_name === user);
+  if (!myGoals.length) { el.innerHTML = '<div style="color:var(--ct);font-size:12px;padding:6px 0">No goals assigned yet.</div>'; return; }
+  const ICONS = { tasks_completed:'✅', shoots_completed:'🎬', posts_published:'📱', campaigns_launched:'🚀' };
+  el.innerHTML = myGoals.map(g => {
+    const cur = calcGoalProgress(g);
+    const tgt = Math.max(1, parseInt(g.target_value) || 1);
+    const pct = Math.min(100, Math.round(cur / tgt * 100));
+    const bc  = pct >= 80 ? 'var(--green)' : pct >= 50 ? 'var(--accent)' : 'var(--amber)';
+    return `<div class="goal-row">
+      <span style="font-size:16px;flex-shrink:0">${ICONS[g.goal_type]||'🎯'}</span>
+      <div class="goal-info">
+        <div class="goal-name">${GOAL_LABELS[g.goal_type]||g.goal_type}</div>
+        <div class="goal-bar-wrap" style="margin-top:4px"><div class="goal-bar" style="width:${pct}%;background:${bc}"></div></div>
+      </div>
+      <span class="goal-pct" style="font-weight:700">${pct}%</span>
+    </div>`;
+  }).join('');
+}
+
+// ─── iCAL FEEDS ───────────────────────────────────────────────────────────────
+function parseICSDate(val) {
+  const c = val.replace('Z','');
+  return `${c.slice(0,4)}-${c.slice(4,6)}-${c.slice(6,8)}`;
+}
+
+function parseICS(text) {
+  const events = [];
+  const lines  = text.replace(/\r\n[ \t]/g,'').split(/\r\n|\n/);
+  let ev = null;
+  for (const line of lines) {
+    if (line === 'BEGIN:VEVENT')       { ev = {}; }
+    else if (line === 'END:VEVENT' && ev) { events.push(ev); ev = null; }
+    else if (ev) {
+      const sep = line.indexOf(':');
+      if (sep < 0) continue;
+      const key = line.slice(0, sep).split(';')[0].toUpperCase();
+      const val = line.slice(sep + 1);
+      if      (key === 'SUMMARY')     ev.title    = val.replace(/\\,/g,',').replace(/\\n/g,' ');
+      else if (key === 'DTSTART')   { ev.start    = parseICSDate(val); ev.allDay = !val.includes('T'); }
+      else if (key === 'DTEND')       ev.end      = parseICSDate(val);
+      else if (key === 'DESCRIPTION') ev.desc     = val.replace(/\\n/g,'\n');
+      else if (key === 'LOCATION')    ev.location = val;
+      else if (key === 'UID')         ev.uid      = val;
+    }
+  }
+  return events;
+}
+
+async function syncICalFeed(feedId) {
+  const feed = DB.iCal_Feeds.find(f => f.id === feedId);
+  if (!feed || !feed.url) return;
+  const btn = document.querySelector(`[data-sync="${feedId}"]`);
+  if (btn) { btn.textContent = '⟳'; btn.disabled = true; }
+  try {
+    const res    = await fetch(ICAL_PROXY + encodeURIComponent(feed.url));
+    const text   = await res.text();
+    const events = parseICS(text);
+    iCalCache[feedId] = events;
+    localStorage.setItem('ais_ical', JSON.stringify(iCalCache));
+    await dbUpdate('iCal_Feeds', feedId, { last_synced: new Date().toISOString() });
+    toast(`✓ Synced ${events.length} events from ${feed.name}`, 'success');
+    renderCalendar();
+    renderICalFeeds();
+  } catch(e) {
+    toast('iCal sync failed — check the URL', 'error');
+  } finally {
+    if (btn) { btn.textContent = '↻'; btn.disabled = false; }
+  }
+}
+
+async function toggleICalFeed(feedId, enabled) {
+  await dbUpdate('iCal_Feeds', feedId, { enabled: String(enabled) });
+  renderCalendar();
+}
+
+function renderICalFeeds() {
+  const el = document.getElementById('admin-ical');
+  if (!el) return;
+  el.innerHTML = DB.iCal_Feeds.length
+    ? DB.iCal_Feeds.map(f => {
+        const cached  = (iCalCache[f.id] || []).length;
+        const enabled = f.enabled !== 'false' && f.enabled !== false;
+        return `<div class="ical-row">
+          <div class="ical-dot" style="background:${f.color||'#6366F1'}"></div>
+          <div style="flex:1;min-width:0">
+            <div class="ical-name">${esc(f.name)}</div>
+            <div class="ical-meta">${cached} events · ${f.last_synced ? 'synced '+fmtDate(f.last_synced.slice(0,10)) : 'not yet synced'}</div>
+          </div>
+          <div style="display:flex;align-items:center;gap:6px;flex-shrink:0">
+            <label style="display:flex;align-items:center;gap:4px;cursor:pointer;font-size:12px">
+              <input type="checkbox" ${enabled?'checked':''} onchange="toggleICalFeed('${f.id}',this.checked)"/> on
+            </label>
+            <button class="btn btn-sm btn-outline" data-sync="${f.id}" onclick="syncICalFeed('${f.id}')">↻</button>
+            <button class="btn btn-sm btn-outline" onclick="openEdit('iCal_Feeds','${f.id}')">Edit</button>
+            ${delBtn('iCal_Feeds', f.id)}
+          </div>
+        </div>`;
+      }).join('')
+    : '<div style="color:var(--ct);padding:12px;font-size:13px">No calendars connected yet</div>';
+}
+
 // ─── SEED DATA ────────────────────────────────────────────────────────────────
 function seedLocalAdd(sheet, data) {
   data.id         = data.id         || genId();
@@ -1469,6 +1722,11 @@ function renderAdmin() {
   // Settings URL
   const urlEl = document.getElementById('settings-url');
   if (urlEl && CONFIG.SCRIPT_URL) urlEl.value = CONFIG.SCRIPT_URL;
+
+  // Goals
+  renderGoals();
+  // iCal Feeds
+  renderICalFeeds();
 }
 
 function saveSettings() {
@@ -1742,6 +2000,37 @@ const FORMS = {
       <option value="">—</option>
       ${DB.Departments.map(d=>`<option value="${d.slug}" ${item.department===d.slug?'selected':''}>${d.name}</option>`).join('')}
     </select></div>`,
+
+  Member_Goals: (item={}) => `
+    <div class="fg"><label class="fl">Member *</label><select class="fs" name="member_name">
+      <option value="">— Select —</option>
+      ${DB.Members.map(m=>`<option value="${m.full_name}" ${item.member_name===m.full_name?'selected':''}>${m.full_name}</option>`).join('')}
+    </select></div>
+    <div class="fg"><label class="fl">Goal Type *</label><select class="fs" name="goal_type">
+      ${Object.entries(GOAL_LABELS).map(([v,l])=>`<option value="${v}" ${item.goal_type===v?'selected':''}>${l}</option>`).join('')}
+    </select></div>
+    <div class="fr">
+      <div class="fg"><label class="fl">Target</label><input class="fi" type="number" min="1" name="target_value" value="${item.target_value||10}"/></div>
+      <div class="fg"><label class="fl">Period</label><select class="fs" name="period">
+        ${['monthly','quarterly'].map(p=>`<option ${item.period===p?'selected':''}>${p}</option>`).join('')}
+      </select></div>
+    </div>
+    <div class="fr">
+      <div class="fg"><label class="fl">Period Start</label><input class="fi" type="date" name="period_start" value="${item.period_start||''}"/></div>
+      <div class="fg"><label class="fl">Period End</label><input class="fi" type="date" name="period_end" value="${item.period_end||''}"/></div>
+    </div>`,
+
+  iCal_Feeds: (item={}) => `
+    <div class="fg"><label class="fl">Calendar Name *</label><input class="fi" name="name" value="${esc(item.name)}" placeholder="e.g. Sopheap Google Calendar"/></div>
+    <div class="fg"><label class="fl">iCal URL *</label><input class="fi" name="url" value="${esc(item.url)}" placeholder="https://calendar.google.com/.../basic.ics"/></div>
+    <div class="fhint" style="margin-top:-8px;margin-bottom:10px">Google: Settings → Secret iCal address · Outlook: Settings → Publish calendar → ICS link</div>
+    <div class="fr">
+      <div class="fg"><label class="fl">Color</label><input class="fi" type="color" name="color" value="${item.color||'#6366F1'}" style="height:40px;padding:4px"/></div>
+      <div class="fg"><label class="fl">Enabled</label><select class="fs" name="enabled">
+        <option value="true" ${(item.enabled===undefined||item.enabled==='true'||item.enabled===true)?'selected':''}>Yes</option>
+        <option value="false" ${item.enabled==='false'||item.enabled===false?'selected':''}>No</option>
+      </select></div>
+    </div>`,
 };
 
 // Safe HTML escape for form values
@@ -1795,9 +2084,19 @@ function closeDrawer() {
 
 async function saveDrawer() {
   if (!drawerEntity) return;
+
+  // Special handler: production log
+  if (drawerEntity === '_ProdLog') {
+    await saveProductionLog();
+    return;
+  }
+
   const form = document.getElementById('dr-body');
   const data = {};
   form.querySelectorAll('[name]').forEach(el => { data[el.name] = el.value; });
+
+  // After save: auto-sync iCal feed if it was just created/edited
+  const wasIcal = drawerEntity === 'iCal_Feeds';
 
   // Validation
   const required = {
@@ -1805,6 +2104,7 @@ async function saveDrawer() {
     Leave_Requests:['member_name','start_date','end_date'],
     Missions:['member_name','title','mission_date'],
     Events:['title','date'], Departments:['name','slug'], Members:['full_name'],
+    Member_Goals:['member_name','goal_type'], iCal_Feeds:['name','url'],
   };
   for (const field of (required[drawerEntity]||[])) {
     if (!data[field]?.trim()) { toast(`${field.replace(/_/g,' ')} is required`, 'error'); return; }
@@ -1814,20 +2114,51 @@ async function saveDrawer() {
   if (btn) { btn.textContent='Saving…'; btn.disabled=true; }
 
   try {
+    let saved;
     if (drawerItem) {
       await dbUpdate(drawerEntity, drawerItem.id, data);
       toast('Updated ✓', 'success');
+      saved = drawerItem;
     } else {
-      await dbAppend(drawerEntity, data);
+      saved = await dbAppend(drawerEntity, data);
       toast('Saved ✓', 'success');
     }
     closeDrawer();
     renderView(currentView);
+    // Auto-sync new iCal feed
+    if (wasIcal && saved?.id && saved?.url) syncICalFeed(saved.id);
   } catch(e) {
     toast('Error: ' + e.message, 'error');
   } finally {
     if (btn) { btn.textContent='Save'; btn.disabled=false; }
   }
+}
+
+async function saveProductionLog() {
+  const form    = document.getElementById('dr-body');
+  const shootId = drawerItem?._id;
+  const shoot   = DB.Shoots.find(s => s.id === shootId);
+  if (!shoot) return;
+
+  const get = n => parseInt(form.querySelector(`[name="${n}"]`)?.value || '0') || 0;
+  const map = [['video',get('videos')],['photo',get('photos')],['reel',get('reels')],['broll',get('broll')]];
+
+  let total = 0;
+  for (const [type, count] of map) {
+    for (let i = 1; i <= count; i++) {
+      await dbAppend('Media_Assets', {
+        title: `${shoot.title} – ${type} ${i}`,
+        type, campus: shoot.campus || '', platform: '',
+        status: 'raw', shoot_id: shootId, tags: '',
+      });
+      total++;
+    }
+  }
+
+  if (!total) { toast('Enter at least 1 asset count', 'warn'); return; }
+  await dbUpdate('Shoots', shootId, { status: 'wrapped' });
+  closeDrawer();
+  toast(`✓ ${total} assets added to Content Pool`, 'success');
 }
 
 // ─── DELETE CONFIRM ───────────────────────────────────────────────────────────

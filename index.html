@@ -325,6 +325,42 @@ tbody tr:hover{background:rgba(255,255,255,.03)}
 .sub-inp::placeholder{color:var(--ct)}
 .sub-add{padding:4px 0 0}
 
+/* ── Shoot cards ─────────────────────────────────────────────── */
+.shoot-card{display:flex;background:var(--bg-card);border:1px solid var(--border-s);border-radius:var(--radius);margin-bottom:8px;overflow:hidden;cursor:pointer;transition:all .12s}
+.shoot-card:hover{border-color:var(--accent);box-shadow:0 0 0 3px var(--accent-soft)}
+.shoot-bar{width:4px;flex-shrink:0}
+.shoot-body{flex:1;padding:11px 14px}
+.shoot-row{display:flex;align-items:flex-start;justify-content:space-between;gap:10px}
+.shoot-title{font-size:13px;font-weight:700;margin-bottom:3px}
+.shoot-meta{font-size:11px;color:var(--ct);line-height:1.5}
+
+/* ── Content Pool ─────────────────────────────────────────────── */
+.pool-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(170px,1fr));gap:12px;padding:4px 0}
+.pool-card{background:var(--bg-card);border:1px solid var(--border-s);border-radius:var(--radius);padding:12px;cursor:pointer;transition:all .12s;display:flex;flex-direction:column;gap:7px}
+.pool-card:hover{border-color:var(--accent);box-shadow:0 0 0 3px var(--accent-soft)}
+.pool-top{display:flex;align-items:center;justify-content:space-between;gap:4px}
+.pool-type{font-size:10px;font-weight:700;color:var(--ct);text-transform:uppercase;letter-spacing:.04em}
+.pool-title{font-size:13px;font-weight:600;line-height:1.4;flex:1}
+.pool-badges{display:flex;gap:5px;flex-wrap:wrap}
+.pool-badge{font-size:9px;background:var(--bg-subtle);padding:1px 6px;border-radius:8px;color:var(--ct)}
+.pool-foot{display:flex;align-items:center;justify-content:space-between;margin-top:auto;gap:4px}
+
+/* ── Goals ───────────────────────────────────────────────────── */
+.goal-row{display:flex;align-items:center;gap:10px;padding:8px 0;border-bottom:1px solid var(--border-s)}
+.goal-row:last-child{border-bottom:none}
+.goal-info{flex:1;min-width:0}
+.goal-name{font-size:11px;font-weight:600;margin-bottom:4px;color:var(--cs)}
+.goal-bar-wrap{background:var(--bg-subtle);border-radius:8px;height:5px;overflow:hidden}
+.goal-bar{height:5px;border-radius:8px;transition:width .4s ease}
+.goal-pct{font-size:10px;color:var(--ct);flex-shrink:0;min-width:30px;text-align:right}
+
+/* ── iCal ────────────────────────────────────────────────────── */
+.ical-row{display:flex;align-items:center;gap:10px;padding:10px 0;border-bottom:1px solid var(--border-s)}
+.ical-row:last-child{border-bottom:none}
+.ical-dot{width:10px;height:10px;border-radius:50%;flex-shrink:0}
+.ical-name{font-size:13px;font-weight:600}
+.ical-meta{font-size:10px;color:var(--ct)}
+
 /* ── Monthly Review ──────────────────────────────────────────── */
 .month-group{margin-bottom:8px;border:1px solid var(--border-s);border-radius:var(--radius);overflow:hidden}
 .month-hd{
@@ -681,6 +717,18 @@ tbody tr:hover{background:rgba(255,255,255,.03)}
         </div>
       </div>
 
+      <!-- My Goals (visible only in My Work mode) -->
+      <div id="dash-goals-card" style="display:none;margin-bottom:14px">
+        <div class="card">
+          <div class="card-hd">
+            <span style="font-size:15px">🎯</span>
+            <span class="card-title">My Goals</span>
+            <span style="font-size:11px;color:var(--ct);margin-left:auto" id="goals-period"></span>
+          </div>
+          <div style="padding:8px 16px" id="my-goals"></div>
+        </div>
+      </div>
+
       <!-- 2-col grid -->
       <div class="dash-grid">
         <div style="display:flex;flex-direction:column;gap:14px">
@@ -834,9 +882,13 @@ tbody tr:hover{background:rgba(255,255,255,.03)}
         <div class="fb">
           <button class="chip on" data-pt="shoots" onclick="setPoolTab('shoots',this)">🎬 Shoots</button>
           <button class="chip" data-pt="pool" onclick="setPoolTab('pool',this)">📦 Content Pool</button>
-          <button class="btn btn-primary btn-sm" onclick="openAdd()">+ Add</button>
+          <button class="btn btn-primary btn-sm" onclick="openPoolAdd()">+ Add</button>
         </div>
-        <div id="media-shoots-wrap" class="tw"><table><thead><tr><th>Title</th><th>Date</th><th>Campus</th><th>Director</th><th>Status</th><th></th></tr></thead><tbody id="shoots-body"></tbody></table></div>
+        <!-- Shoots list -->
+        <div id="media-shoots-wrap">
+          <div id="shoots-list"></div>
+        </div>
+        <!-- Content Pool grid -->
         <div id="media-pool-wrap" style="display:none">
           <div class="fb" style="margin-top:0">
             <button class="chip on" data-pw="all" onclick="setPoolFilter('all',this)">All</button>
@@ -844,7 +896,7 @@ tbody tr:hover{background:rgba(255,255,255,.03)}
             <button class="chip" data-pw="editing" onclick="setPoolFilter('editing',this)">Editing</button>
             <button class="chip" data-pw="ready" onclick="setPoolFilter('ready',this)">Ready</button>
           </div>
-          <div class="tw"><table><thead><tr><th>Title</th><th>Type</th><th>Campus</th><th>Platform</th><th>Status</th><th>Age</th><th></th></tr></thead><tbody id="pool-body"></tbody></table></div>
+          <div class="pool-grid" id="pool-grid"></div>
         </div>
       </div>
 
@@ -992,6 +1044,26 @@ tbody tr:hover{background:rgba(255,255,255,.03)}
           <div class="card-hd"><span class="card-title">Members</span><button class="btn btn-sm btn-primary" onclick="openAdd('Members')">+ Add</button></div>
           <div id="admin-members" style="padding:8px"></div>
         </div>
+      </div>
+
+      <!-- Member Goals -->
+      <div class="card" style="margin-bottom:20px">
+        <div class="card-hd">
+          <span style="font-size:15px">🎯</span>
+          <span class="card-title">Member Goals</span>
+          <button class="btn btn-sm btn-primary" onclick="openAdd('Member_Goals')">+ Add Goal</button>
+        </div>
+        <div id="admin-goals" style="padding:8px 16px"></div>
+      </div>
+
+      <!-- iCal Feeds -->
+      <div class="card" style="margin-bottom:20px">
+        <div class="card-hd">
+          <span style="font-size:15px">📅</span>
+          <span class="card-title">Connected Calendars</span>
+          <button class="btn btn-sm btn-primary" onclick="openAdd('iCal_Feeds')">+ Add Calendar</button>
+        </div>
+        <div id="admin-ical" style="padding:8px 16px"></div>
       </div>
       <div class="card">
         <div class="card-hd"><span class="card-title">Settings</span></div>
