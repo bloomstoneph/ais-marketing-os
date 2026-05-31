@@ -693,8 +693,8 @@ function renderCalendar() {
           <div class="cal-feed-actions">
             <input type="checkbox" ${enabled?'checked':''} style="cursor:pointer" title="Enable/disable"
               onchange="toggleICalFeed('${f.id}',this.checked)"/>
-            <button style="background:none;border:none;cursor:pointer;color:var(--ct);font-size:13px;padding:0 2px"
-              title="Sync now" onclick="syncICalFeed('${f.id}')">↻</button>
+            <button style="background:none;border:none;cursor:pointer;color:var(--ct);font-size:13px;padding:0 2px" title="Sync" onclick="syncICalFeed('${f.id}')">↻</button>
+            <button style="background:none;border:none;cursor:pointer;color:var(--ct);font-size:12px;padding:0 2px" title="Edit" onclick="openEdit('iCal_Feeds','${f.id}')">✏️</button>
           </div>
         </div>`;
       }).join('');
