@@ -64,7 +64,7 @@ window.addEventListener('DOMContentLoaded', () => {
     navigator.serviceWorker.register('sw.js').catch(e => console.warn('SW:', e));
 
   // Online/offline
-  window.addEventListener('online',  () => { hideBanner(); flushQueue(); toast('Back online — syncing…', 'info'); });
+  window.addEventListener('online',  () => { hideBanner(); flushQueue(); });
   window.addEventListener('offline', () => showBanner());
   if (!navigator.onLine) showBanner();
 
@@ -90,8 +90,12 @@ window.addEventListener('DOMContentLoaded', () => {
     if (mb) mb.style.display = 'flex';
   }
 
-  // Restore offline queue
+  // Restore offline queue — auto-clear stale items older than 24h
   pendingQueue = JSON.parse(localStorage.getItem(CONFIG.LS_QUEUE) || '[]');
+  const cutoff = Date.now() - 86400000;
+  pendingQueue = pendingQueue.filter(op => !op._ts || op._ts > cutoff);
+  saveQueue();
+  setTimeout(updateQueueBadge, 0);
 
   // Load cached iCal events
   try { iCalCache = JSON.parse(localStorage.getItem('ais_ical') || '{}'); } catch(e) {}
@@ -181,7 +185,7 @@ async function pushToSheets(payload) {
     return true;
   } catch(e) {
     enqueue(payload);
-    toast('Queued — will sync when online', 'warn');
+    // No per-item toast — queue badge handles this silently
     return false;
   }
 }
@@ -189,6 +193,25 @@ async function pushToSheets(payload) {
 function enqueue(payload) {
   pendingQueue.push({ ...payload, _ts: Date.now() });
   saveQueue();
+  updateQueueBadge();
+}
+
+function updateQueueBadge() {
+  const el = document.getElementById('queue-badge');
+  if (!el) return;
+  if (pendingQueue.length) {
+    el.textContent = pendingQueue.length + ' queued';
+    el.style.display = 'inline';
+  } else {
+    el.style.display = 'none';
+  }
+}
+
+function clearQueue() {
+  pendingQueue = [];
+  saveQueue();
+  updateQueueBadge();
+  toast('Queue cleared ✓', 'success');
 }
 
 async function flushQueue() {
@@ -196,11 +219,12 @@ async function flushQueue() {
   const batch = [...pendingQueue];
   pendingQueue = [];
   saveQueue();
+  let failed = 0;
   for (const op of batch) {
-    try { await pushToSheets(op); } catch(e) { pendingQueue.push(op); }
+    try { await pushToSheets(op); } catch(e) { pendingQueue.push(op); failed++; }
   }
-  if (pendingQueue.length) { saveQueue(); toast(`${pendingQueue.length} ops still pending`, 'warn'); }
-  else toast('Queue flushed ✓', 'success');
+  if (pendingQueue.length) { saveQueue(); }
+  updateQueueBadge();
 }
 
 // ─── CRUD ─────────────────────────────────────────────────────────────────────
