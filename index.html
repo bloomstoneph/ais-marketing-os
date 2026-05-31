@@ -761,6 +761,9 @@ tbody tr:hover{background:rgba(255,255,255,.03)}
         <div class="stab" id="stab-media-cal" onclick="setPlannerTab('media-cal',this)">
           <svg viewBox="0 0 24 24"><polygon points="23 7 16 12 23 17 23 7"/><rect x="1" y="5" width="15" height="14" rx="2"/></svg>Media Calendar
         </div>
+        <div class="stab" id="stab-events-pl" onclick="setPlannerTab('events',this)">
+          <svg viewBox="0 0 24 24"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>Events
+        </div>
       </div>
 
       <!-- Calendar tab -->
@@ -826,6 +829,15 @@ tbody tr:hover{background:rgba(255,255,255,.03)}
         </div>
         <div id="media-cal-grid"></div>
       </div>
+
+      <!-- Events tab (moved from Marketing) -->
+      <div class="stab-content" id="sc-events">
+        <div class="fb">
+          <select class="fsel" onchange="filterEvents()" id="ev-campus"><option value="">All Campuses</option><option>MTT</option><option>TK</option><option>CA</option><option>TAK</option><option>SR</option></select>
+          <button class="btn btn-primary btn-sm" onclick="openAdd('Events')">+ Event</button>
+        </div>
+        <div class="tw"><table><thead><tr><th>Title</th><th>Date</th><th>Time</th><th>Campus</th><th>Status</th><th></th></tr></thead><tbody id="ev-body"></tbody></table></div>
+      </div>
     </div>
 
     <!-- ── Marketing ── -->
@@ -842,9 +854,6 @@ tbody tr:hover{background:rgba(255,255,255,.03)}
         </div>
         <div class="stab" id="stab-enrollment" onclick="setMktTab('enrollment',this)">
           <svg viewBox="0 0 24 24"><path d="M22 10v6M2 10l10-5 10 5-10 5z"/><path d="M6 12v5c3 3 9 3 12 0v-5"/></svg>Enrollment
-        </div>
-        <div class="stab" id="stab-events" onclick="setMktTab('events',this)">
-          <svg viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="18" rx="2"/><line x1="3" y1="10" x2="21" y2="10"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="16" y1="2" x2="16" y2="6"/></svg>Events
         </div>
       </div>
 
@@ -906,14 +915,6 @@ tbody tr:hover{background:rgba(255,255,255,.03)}
         <div class="tw"><table><thead><tr><th>Campus</th><th>Month</th><th>Year</th><th>Leads</th><th>Enrolled</th><th>Conversion</th><th>Notes</th><th></th></tr></thead><tbody id="en-body"></tbody></table></div>
       </div>
 
-      <!-- Events -->
-      <div class="stab-content" id="sm-events">
-        <div class="fb">
-          <select class="fsel" onchange="filterEvents()" id="ev-campus"><option value="">All Campuses</option><option>MTT</option><option>TK</option><option>CA</option><option>TAK</option><option>SR</option></select>
-          <button class="btn btn-primary btn-sm" onclick="openAdd('Events')">+ Event</button>
-        </div>
-        <div class="tw"><table><thead><tr><th>Title</th><th>Date</th><th>Time</th><th>Campus</th><th>Status</th><th></th></tr></thead><tbody id="ev-body"></tbody></table></div>
-      </div>
     </div>
 
     <!-- ── People ── -->

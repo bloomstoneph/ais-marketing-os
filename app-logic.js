@@ -274,31 +274,29 @@ function renderAll() { renderView(currentView); }
 
 // ─── TAB SWITCHERS ────────────────────────────────────────────────────────────
 function setPlannerTab(tab, el) {
-  // Tab buttons
-  ['stab-calendar','stab-tasks','stab-media-cal'].forEach(id => {
+  ['stab-calendar','stab-tasks','stab-media-cal','stab-events-pl'].forEach(id => {
     document.getElementById(id)?.classList.remove('active');
   });
   el.classList.add('active');
 
-  // Content panels
-  ['sc-calendar','sc-tasks','sc-media-cal'].forEach(id => {
+  ['sc-calendar','sc-tasks','sc-media-cal','sc-events'].forEach(id => {
     document.getElementById(id)?.classList.remove('active');
   });
   document.getElementById('sc-' + tab)?.classList.add('active');
 
-  // Render relevant section
   if (tab === 'calendar')  renderCalendar();
   if (tab === 'tasks')     renderTasks();
   if (tab === 'media-cal') renderMediaCal();
+  if (tab === 'events')    renderEvents();
 }
 
 function setMktTab(tab, el) {
-  ['stab-campaigns','stab-media','stab-social','stab-enrollment','stab-events'].forEach(id => {
+  ['stab-campaigns','stab-media','stab-social','stab-enrollment'].forEach(id => {
     document.getElementById(id)?.classList.remove('active');
   });
   el.classList.add('active');
 
-  ['sm-campaigns','sm-media','sm-social','sm-enrollment','sm-events'].forEach(id => {
+  ['sm-campaigns','sm-media','sm-social','sm-enrollment'].forEach(id => {
     document.getElementById(id)?.classList.remove('active');
   });
   document.getElementById('sm-' + tab)?.classList.add('active');
@@ -307,7 +305,6 @@ function setMktTab(tab, el) {
   if (tab === 'media')      renderMedia();
   if (tab === 'social')     renderSocial();
   if (tab === 'enrollment') renderEnrollment();
-  if (tab === 'events')     renderEvents();
 }
 
 function setIntelTab(tab, el) {
@@ -583,6 +580,7 @@ function renderDashboard() {
 
 // ─── PLANNER ──────────────────────────────────────────────────────────────────
 function renderPlanner() {
+  if (document.getElementById('sc-events')?.classList.contains('active')) renderEvents();
   // Render whichever tab is currently active
   const calTab  = document.getElementById('sc-calendar');
   const taskTab = document.getElementById('sc-tasks');
@@ -857,12 +855,10 @@ function renderMarketing() {
   const medTab  = document.getElementById('sm-media');
   const socTab  = document.getElementById('sm-social');
   const enTab   = document.getElementById('sm-enrollment');
-  const evTab   = document.getElementById('sm-events');
   if (campTab?.classList.contains('active')) renderCampaigns();
   if (medTab?.classList.contains('active'))  renderMedia();
   if (socTab?.classList.contains('active'))  renderSocial();
   if (enTab?.classList.contains('active'))   renderEnrollment();
-  if (evTab?.classList.contains('active'))   renderEvents();
 }
 
 // ─── CAMPAIGNS ────────────────────────────────────────────────────────────────
