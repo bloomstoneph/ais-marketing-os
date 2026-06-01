@@ -7,7 +7,7 @@
 // ─── CONFIG ───────────────────────────────────────────────────────────────────
 const CONFIG = {
   SCRIPT_URL:    localStorage.getItem('ais_script_url') || 'https://script.google.com/macros/s/AKfycbyEo1uEwr8cASUvW-jyKpL39QXraT0lgWPl1JtwFmIPHg2hFF5OnFYqyWjH66FunJho/exec',
-  SYNC_INTERVAL: 30_000,
+  SYNC_INTERVAL: 5_000,
   LS_KEY:        'ais_data',
   CAMPUSES:      ['MTT','TK','CA','TAK','SR'],
   PRIORITIES:    ['low','medium','high','critical'],
@@ -178,21 +178,26 @@ function updateSyncTime() {
 }
 
 // ─── SYNC — PUSH (direct, no queue) ──────────────────────────────────────────
-async function pushToSheets(payload) {
-  if (!CONFIG.SCRIPT_URL) return true; // no URL configured — skip silently
-  try {
-    const res  = await fetch(CONFIG.SCRIPT_URL, {
-      method:  'POST',
-      body:    JSON.stringify(payload),
-      headers: { 'Content-Type': 'application/json' },
-    });
-    const json = await res.json();
-    if (!json.ok) throw new Error(json.error);
-    return true;
-  } catch(e) {
-    // Show a small non-blocking warning but don't queue
-    console.warn('Sheets push failed:', e.message);
-    return false;
+async function pushToSheets(payload, retries = 2) {
+  if (!CONFIG.SCRIPT_URL) return true;
+  for (let attempt = 0; attempt <= retries; attempt++) {
+    try {
+      const res  = await fetch(CONFIG.SCRIPT_URL, {
+        method:  'POST',
+        body:    JSON.stringify(payload),
+        headers: { 'Content-Type': 'application/json' },
+      });
+      const data = await res.json();
+      if (!data.ok) throw new Error(data.error);
+      return true;
+    } catch(e) {
+      if (attempt === retries) {
+        console.warn('Sheets push failed after retries:', e.message);
+        toast('⚠️ Sheets sync failed — saved locally', 'warn');
+        return false;
+      }
+      await new Promise(r => setTimeout(r, 1000 * (attempt + 1)));
+    }
   }
 }
 
