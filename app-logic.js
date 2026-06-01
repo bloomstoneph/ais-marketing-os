@@ -161,6 +161,31 @@ function manualSync() {
   fetchFromSheets().then(() => toast('Connection OK ✓', 'success'));
 }
 
+async function pushAllToSheets() {
+  if (!CONFIG.SCRIPT_URL) { toast('Add your Sheets URL first', 'warn'); return; }
+  const total = Object.values(DB).reduce((n, arr) => n + arr.length, 0);
+  if (!total) { toast('No local data to push', 'warn'); return; }
+
+  toast(`Pushing ${total} records to Google Sheets…`, 'info');
+  const ops = [];
+  Object.entries(DB).forEach(([sheet, rows]) => {
+    rows.forEach(row => ops.push({ action: 'append', sheet, data: row }));
+  });
+
+  try {
+    const res    = await fetch(CONFIG.SCRIPT_URL, {
+      method:  'POST',
+      body:    JSON.stringify({ action: 'batch', operations: ops }),
+      headers: { 'Content-Type': 'application/json' },
+    });
+    const result = await res.json();
+    if (!result.ok) throw new Error(result.error);
+    toast(`✓ ${total} records pushed to Sheets!`, 'success');
+  } catch(e) {
+    toast('Push failed: ' + e.message, 'error');
+  }
+}
+
 async function pullFromSheets() {
   if (!CONFIG.SCRIPT_URL) { toast('Add your Sheets URL first', 'warn'); return; }
   toast('Pulling data from Google Sheets…', 'info');
