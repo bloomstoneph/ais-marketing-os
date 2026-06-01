@@ -37,9 +37,12 @@ let iCalCache = {};
 let currentView      = 'dashboard';
 let currentDashView  = 'team';
 let calDate          = new Date();
+let calViewMode      = 'month'; // 'month' | 'week'
 let calFilters       = { leave: true, mission: true, dayoff: true };
 let taskFilterStatus = 'all';
 let taskFilterDept   = '';
+let taskViewMode     = 'team';
+let groupByMode      = 'status';
 let campaignFilter   = 'all';
 let peopleFilter     = 'all';
 let mediaPoolTab     = 'shoots';
@@ -336,17 +339,67 @@ function setPF(filter, el) {
 
 function setDashView(view, el) {
   currentDashView = view;
-  document.getElementById('vteam').className = view === 'team'
-    ? 'btn btn-sm btn-primary'
-    : 'btn btn-sm';
-  document.getElementById('vmy').className = view === 'my'
-    ? 'btn btn-sm btn-primary'
-    : 'btn btn-sm';
-  document.getElementById('vteam').style.background = view === 'team' ? '' : 'transparent';
-  document.getElementById('vmy').style.background   = view === 'my'   ? '' : 'transparent';
-  document.getElementById('vteam').style.color = view === 'team' ? '' : 'var(--cs)';
-  document.getElementById('vmy').style.color   = view === 'my'   ? '' : 'var(--cs)';
+  document.querySelectorAll('#vteam,#vmy').forEach(b => b.classList.remove('tgl-active'));
+  el.classList.add('tgl-active');
   renderDashboard();
+}
+
+function navToTasks() {
+  nav('planner');
+  setTimeout(() => setPlannerTab('tasks', document.getElementById('stab-tasks')), 50);
+}
+
+function setTaskView(view, el) {
+  taskViewMode = view;
+  document.querySelectorAll('#tv-mine,#tv-team').forEach(b => b.classList.remove('tgl-active'));
+  el.classList.add('tgl-active');
+  renderTasks();
+}
+
+function setGroupBy(gb, el) {
+  groupByMode = gb;
+  document.querySelectorAll('[data-gb]').forEach(b => b.classList.remove('on'));
+  el.classList.add('on');
+  renderTasks();
+}
+
+async function quickAddTask(event) {
+  if (event.key !== 'Enter') return;
+  const input = document.getElementById('quick-task-input');
+  const title = (input?.value || '').trim();
+  if (!title) return;
+  const assignee = document.getElementById('quick-assignee')?.value || '';
+  const due      = document.getElementById('quick-due')?.value || '';
+  const dept     = document.getElementById('task-dept')?.value || '';
+  await dbAppend('Tasks', { title, assignee_name: assignee, due_date: due, department: dept, status: 'todo', priority: 'medium' });
+  if (input) input.value = '';
+  toast('Task added ✓', 'success');
+}
+
+function setCurrentUser(name) {
+  localStorage.setItem('ais_current_user', name);
+  if (name) toast(`Hi ${name.split(' ')[0]} 👋`, 'success');
+}
+
+// Select a status/priority pill (works for both add + edit)
+function selectTaskPill(el, field, taskId) {
+  const val = el.dataset.val;
+  el.closest('.pill-row').querySelectorAll('[data-field="' + field + '"]').forEach(b => {
+    b.classList.remove('active');
+  });
+  el.classList.add('active');
+  const hidden = document.querySelector('[name="' + field + '"]');
+  if (hidden) hidden.value = val;
+  if (taskId) quickUpdateTask(taskId, field, val);
+}
+
+async function quickUpdateTask(id, field, value) {
+  await dbUpdate('Tasks', id, { [field]: value });
+  // Re-render title in drawer header if title changed
+  if (field === 'title') {
+    const dt = document.getElementById('dr-title');
+    if (dt) dt.textContent = value;
+  }
 }
 
 function toggleCalFilter(type, el) {
@@ -451,120 +504,149 @@ function statusColor(s) {
   return { todo:'#64748B', in_progress:'#3B82F6', in_review:'#F59E0B', done:'#22C55E', blocked:'#EF4444' }[s] || '#64748B';
 }
 
-function emptyState(msg) {
-  return `<div style="padding:48px;text-align:center;color:var(--ct);font-size:13px">${msg}</div>`;
+function emptyState(msg, icon='📭', cta=null, ctaFn=null) {
+  return `<div class="empty-state">
+    <div class="empty-icon">${icon}</div>
+    <div class="empty-msg">${msg}</div>
+    ${cta ? `<button class="btn btn-primary btn-sm" onclick="${ctaFn}">${cta}</button>` : ''}
+  </div>`;
 }
 
 // ─── DASHBOARD ────────────────────────────────────────────────────────────────
 function renderDashboard() {
-  // KPIs
-  const activeTasks     = DB.Tasks.filter(t => t.status !== 'done' && t.status !== 'blocked').length;
-  const doneTasks       = DB.Tasks.filter(t => t.status === 'done').length;
-  const activeCampaigns = DB.Campaigns.filter(c => c.status === 'active').length;
-  const upcomingEvents  = DB.Events.filter(e => { const d = daysUntil(e.date); return d !== null && d >= 0 && d <= 14; }).length;
-  const overdueTasks    = DB.Tasks.filter(t => t.status !== 'done' && isOverdue(t.due_date)).length;
-  const totalTasks      = DB.Tasks.length;
-  const pct             = totalTasks ? Math.round((doneTasks / totalTasks) * 100) : 0;
-  const onLeaveToday    = DB.Leave_Requests.filter(r => { const td = new Date().toISOString().slice(0,10); return r.start_date<=td && r.end_date>=td; }).length;
+  const today        = new Date().toISOString().slice(0,10);
+  const doneTasks    = DB.Tasks.filter(t => t.status === 'done').length;
+  const activeTasks  = DB.Tasks.filter(t => t.status !== 'done' && t.status !== 'blocked').length;
+  const overdueTasks = DB.Tasks.filter(t => t.status !== 'done' && isOverdue(t.due_date)).length;
+  const totalTasks   = DB.Tasks.length;
+  const pct          = totalTasks ? Math.round((doneTasks / totalTasks) * 100) : 0;
+  const onLeave      = DB.Leave_Requests.filter(r => r.start_date <= today && r.end_date >= today).length;
+  const onMission    = DB.Missions.filter(r => r.mission_date === today).length;
+  const onDayOff     = DB.Comp_Days.filter(r => r.comp_date === today).length;
+  const outTotal     = onLeave + onMission + onDayOff;
 
+  // Greeting
+  const hr = new Date().getHours();
+  const greet = hr < 12 ? 'Good morning' : hr < 17 ? 'Good afternoon' : 'Good evening';
+  const user  = localStorage.getItem('ais_current_user');
+  const greetEl = document.getElementById('dash-greeting');
+  if (greetEl) greetEl.textContent = user ? `${greet}, ${user.split(' ')[0]} 👋` : greet + '!';
+
+  // ── KPI grid ──────────────────────────────────────────────────
   const kpiEl = document.getElementById('dash-kpis');
   if (kpiEl) kpiEl.innerHTML = [
-    { icon:'📋', label:'Open Tasks',       val:activeTasks,       sub: overdueTasks ? `⚠️ ${overdueTasks} overdue` : `${pct}% complete`,   color:'#3B82F6' },
-    { icon:'🚀', label:'Active Campaigns', val:activeCampaigns,   sub:`of ${DB.Campaigns.length} total`,                                    color:'#A855F7' },
-    { icon:'🌿', label:'On Leave Today',   val:onLeaveToday,      sub:`of ${DB.Members.length} team members`,                              color:'#22C55E' },
-    { icon:'📅', label:'Upcoming Events',  val:upcomingEvents,    sub:'next 14 days',                                                       color:'#F59E0B' },
-    { icon:'🎬', label:'Scheduled Shoots', val:DB.Shoots.filter(s=>s.status==='scheduled').length, sub:'upcoming',                          color:'#EC4899' },
-    { icon:'💬', label:'Meetings Logged',  val:DB.Meetings.length,sub:`${DB.Meeting_Actions.filter(a=>!a.pushed||a.pushed==='false').length} actions pending`, color:'#64748B' },
+    { icon:'📋', label:'Open Tasks',       val:activeTasks,  sub:overdueTasks?`⚠️ ${overdueTasks} overdue`:`${pct}% done`,   color:'#3B82F6' },
+    { icon:'🚀', label:'Active Campaigns', val:DB.Campaigns.filter(c=>c.status==='active').length, sub:`of ${DB.Campaigns.length} total`, color:'#A855F7' },
+    { icon:'👥', label:'Out Today',        val:outTotal,     sub:`of ${DB.Members.length} members`,                           color:'#22C55E' },
+    { icon:'📅', label:'Upcoming Events',  val:DB.Events.filter(e=>{const d=daysUntil(e.date);return d!==null&&d>=0&&d<=14;}).length, sub:'next 14 days', color:'#F59E0B' },
+    { icon:'🎬', label:'Shoots Scheduled', val:DB.Shoots.filter(s=>s.status==='scheduled').length, sub:'upcoming',            color:'#EC4899' },
+    { icon:'💬', label:'Pending Actions',  val:DB.Meeting_Actions.filter(a=>!a.pushed||a.pushed==='false').length, sub:'from meetings', color:'#64748B' },
   ].map(k => `
-    <div class="kpi" style="border-top:3px solid ${k.color}">
-      <div class="kpi-icon">${k.icon}</div>
+    <div class="kpi" style="border-top:3px solid ${k.color};cursor:pointer" onclick="navToTasks()">
       <div class="kpi-label">${k.label}</div>
       <div class="kpi-val" style="color:${k.color}">${k.val}</div>
       <div class="kpi-sub">${k.sub}</div>
     </div>`).join('');
 
-  // Open tasks
-  const priorityOrder = { critical:0, high:1, medium:2, low:3 };
-  const tasks = DB.Tasks
-    .filter(t => t.status !== 'done')
-    .sort((a,b) => (priorityOrder[a.priority]||2)-(priorityOrder[b.priority]||2) || (a.due_date||'9').localeCompare(b.due_date||'9'))
-    .slice(0, 6);
+  // ── Out Today ─────────────────────────────────────────────────
+  const outWrap  = document.getElementById('dash-out-wrap');
+  const outList  = document.getElementById('dash-out-list');
+  const outBadge = document.getElementById('dash-out-badge');
+  if (outWrap && outList) {
+    const outPeople = [
+      ...DB.Leave_Requests.filter(r=>r.start_date<=today&&r.end_date>=today).map(r=>({name:r.member_name,type:'🌿 Leave',reason:r.leave_type})),
+      ...DB.Missions.filter(r=>r.mission_date===today).map(r=>({name:r.member_name,type:'⚡ Mission',reason:r.title})),
+      ...DB.Comp_Days.filter(r=>r.comp_date===today).map(r=>({name:r.member_name,type:'🌙 Day Off',reason:''})),
+    ];
+    outWrap.style.display = outPeople.length ? '' : 'none';
+    if (outBadge) outBadge.textContent = outPeople.length;
+    outList.innerHTML = outPeople.map(p => `
+      <div class="att-row">
+        ${av(p.name)}
+        <div style="flex:1;min-width:0">
+          <div style="font-size:13px;font-weight:600">${esc(p.name)}</div>
+          <div style="font-size:11px;color:var(--ct)">${p.type}${p.reason?' · '+esc(p.reason):''}</div>
+        </div>
+      </div>`).join('');
+  }
 
-  const dashTasks = document.getElementById('dash-tasks');
-  if (dashTasks) dashTasks.innerHTML = tasks.length
-    ? tasks.map(t => {
-        const sub = DB.Subtasks.filter(s => s.task_id === t.id);
-        const done = sub.filter(s => s.done === 'true' || s.done === true).length;
-        return `
-          <div class="task-row" onclick="nav('planner')">
-            <div class="tcheck ${t.status==='done'?'done':''}"></div>
-            <div class="tdept" style="background:${deptColor(t.department)}"></div>
-            <div class="ttitle ${t.status==='done'?'done':''}" style="flex:1">${truncate(t.title,44)}</div>
-            <div class="tmeta">
-              ${sub.length ? `<span class="tsub-badge">${done}/${sub.length}</span>` : ''}
-              ${t.due_date ? `<span class="tdue ${isOverdue(t.due_date)?'over':''}">${fmtDate(t.due_date)}</span>` : ''}
-              ${pill(t.priority)}
-            </div>
-          </div>`;
-      }).join('')
-    : '<div style="color:var(--ct);font-size:13px;padding:24px 0;text-align:center">🎉 All tasks complete!</div>';
+  // ── Needs Attention ───────────────────────────────────────────
+  const attEl    = document.getElementById('dash-attention');
+  const attnTitle = document.getElementById('dash-attn-title');
+  if (attEl) {
+    const currentUser = localStorage.getItem('ais_current_user') || '';
+    let src = DB.Tasks.filter(t => t.status !== 'done');
+    if (currentDashView === 'my' && currentUser) src = src.filter(t => t.assignee_name === currentUser);
+    const overdue  = src.filter(t => isOverdue(t.due_date));
+    const dueToday = src.filter(t => !isOverdue(t.due_date) && daysUntil(t.due_date) === 0);
+    const dueWeek  = src.filter(t => daysUntil(t.due_date) > 0 && daysUntil(t.due_date) <= 7);
+    if (attnTitle) attnTitle.textContent = `Needs Attention (${overdue.length + dueToday.length})`;
+    const items = [
+      ...overdue.map(t  => ({ t, tagLabel:'Overdue',   tagClass:'tag-overdue' })),
+      ...dueToday.map(t => ({ t, tagLabel:'Due Today',  tagClass:'tag-today'   })),
+      ...dueWeek.slice(0,3).map(t => ({ t, tagLabel:'This Week', tagClass:'tag-week' })),
+    ].slice(0, 8);
+    attEl.innerHTML = items.length
+      ? items.map(({ t, tagLabel, tagClass }) => `
+        <div class="att-row" onclick="openEdit('Tasks','${t.id}')" style="cursor:pointer">
+          <span class="att-tag ${tagClass}">${tagLabel}</span>
+          <div style="flex:1;min-width:0">
+            <div style="font-size:13px;font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(t.title)}</div>
+            <div style="font-size:11px;color:var(--ct)">${esc(t.assignee_name||'Unassigned')} · ${deptName(t.department)}</div>
+          </div>
+          ${t.due_date?`<span style="font-size:11px;color:var(--ct);flex-shrink:0">${fmtDate(t.due_date)}</span>`:''}
+        </div>`).join('')
+      : `<div style="padding:16px 0;text-align:center;color:var(--ct);font-size:13px">🎉 Nothing urgent — you're on track</div>`;
+  }
 
-  // Upcoming events
-  const events = DB.Events.filter(e => daysUntil(e.date) >= 0)
-    .sort((a,b) => (a.date||'').localeCompare(b.date||'')).slice(0, 4);
-  const dashEvents = document.getElementById('dash-events');
-  if (dashEvents) dashEvents.innerHTML = events.length
-    ? events.map(e => {
-        const d   = daysUntil(e.date);
-        const tag = d === 0
-          ? '<span style="font-size:9px;font-weight:700;color:var(--red);background:var(--red-soft);padding:1px 6px;border-radius:6px">TODAY</span>'
-          : d === 1
-          ? '<span style="font-size:9px;color:var(--amber);font-weight:700">Tomorrow</span>'
-          : `<span style="font-size:9px;color:var(--ct)">in ${d}d</span>`;
-        return `
-          <div style="display:flex;align-items:center;gap:10px;padding:10px 0;border-bottom:1px solid var(--border-s)">
-            <div style="text-align:center;min-width:36px">
-              <div style="font-size:18px;font-weight:800;color:var(--accent);line-height:1">${new Date(e.date+'T00:00:00').getDate()}</div>
-              <div style="font-size:9px;color:var(--ct);text-transform:uppercase">${fmtDate(e.date,{month:'short'})}</div>
-            </div>
-            <div style="flex:1;min-width:0">
-              <div style="font-size:13px;font-weight:600">${truncate(e.title,35)}</div>
-              <div style="font-size:11px;color:var(--ct)">${e.campus||''} ${e.time||''}</div>
-            </div>
-            ${tag}
-          </div>`;
-      }).join('')
-    : '<div style="color:var(--ct);font-size:13px;padding:16px 0;text-align:center">No upcoming events</div>';
-
-  // My Goals (only in My Work view)
+  // ── My Goals ──────────────────────────────────────────────────
   const goalsCard = document.getElementById('dash-goals-card');
   if (goalsCard) {
     goalsCard.style.display = currentDashView === 'my' ? '' : 'none';
     if (currentDashView === 'my') renderMyGoals();
   }
 
-  // Active campaigns
-  const camps = DB.Campaigns.filter(c => c.status === 'active').slice(0, 4);
+  // ── Active campaigns ──────────────────────────────────────────
+  const camps    = DB.Campaigns.filter(c => c.status === 'active').slice(0, 4);
   const dashCamps = document.getElementById('dash-campaigns');
   if (dashCamps) dashCamps.innerHTML = camps.length
     ? camps.map(c => {
-        const dEnd = daysUntil(c.end_date);
+        const dEnd   = daysUntil(c.end_date);
         const endTag = dEnd !== null
-          ? (dEnd < 0 ? '<span style="font-size:9px;color:var(--red)">Ended</span>'
-          : dEnd === 0 ? '<span style="font-size:9px;color:var(--red)">Ends today</span>'
-          : `<span style="font-size:9px;color:var(--ct)">ends in ${dEnd}d</span>`)
-          : '';
-        return `
-          <div style="display:flex;align-items:center;gap:10px;padding:10px 0;border-bottom:1px solid var(--border-s)">
-            <div style="width:10px;height:10px;border-radius:50%;background:${deptColor(c.department)};flex-shrink:0"></div>
-            <div style="flex:1;min-width:0">
-              <div style="font-size:13px;font-weight:600">${truncate(c.title,35)}</div>
-              <div style="font-size:11px;color:var(--ct)">${deptName(c.department)}</div>
-            </div>
-            ${endTag}
-          </div>`;
+          ? dEnd < 0  ? '<span style="font-size:9px;color:var(--red)">Ended</span>'
+          : dEnd === 0? '<span style="font-size:9px;color:var(--red)">Ends today</span>'
+          : `<span style="font-size:9px;color:var(--ct)">ends in ${dEnd}d</span>` : '';
+        return `<div style="display:flex;align-items:center;gap:10px;padding:10px 0;border-bottom:1px solid var(--border-s);cursor:pointer" onclick="openEdit('Campaigns','${c.id}')">
+          <div style="width:10px;height:10px;border-radius:50%;background:${deptColor(c.department)};flex-shrink:0"></div>
+          <div style="flex:1;min-width:0">
+            <div style="font-size:13px;font-weight:600">${truncate(c.title,35)}</div>
+            <div style="font-size:11px;color:var(--ct)">${deptName(c.department)}</div>
+          </div>${endTag}
+        </div>`;
       }).join('')
-    : '<div style="color:var(--ct);font-size:13px;padding:16px 0;text-align:center">No active campaigns</div>';
+    : emptyState('No active campaigns yet','🚀','+ New Campaign',"openAdd('Campaigns')");
+
+  // ── Upcoming events ───────────────────────────────────────────
+  const events    = DB.Events.filter(e=>daysUntil(e.date)>=0).sort((a,b)=>(a.date||'').localeCompare(b.date||'')).slice(0,4);
+  const dashEvents = document.getElementById('dash-events');
+  if (dashEvents) dashEvents.innerHTML = events.length
+    ? events.map(e => {
+        const d   = daysUntil(e.date);
+        const tag = d===0?'<span style="font-size:9px;font-weight:700;color:var(--red);background:var(--red-soft);padding:1px 6px;border-radius:6px">TODAY</span>'
+          :d===1?'<span style="font-size:9px;color:var(--amber);font-weight:700">Tomorrow</span>'
+          :`<span style="font-size:9px;color:var(--ct)">in ${d}d</span>`;
+        return `<div style="display:flex;align-items:center;gap:10px;padding:10px 0;border-bottom:1px solid var(--border-s);cursor:pointer" onclick="openEdit('Events','${e.id}')">
+          <div style="text-align:center;min-width:36px">
+            <div style="font-size:18px;font-weight:800;color:var(--accent);line-height:1">${new Date(e.date+'T00:00:00').getDate()}</div>
+            <div style="font-size:9px;color:var(--ct);text-transform:uppercase">${fmtDate(e.date,{month:'short'})}</div>
+          </div>
+          <div style="flex:1;min-width:0">
+            <div style="font-size:13px;font-weight:600">${truncate(e.title,35)}</div>
+            <div style="font-size:11px;color:var(--ct)">${e.campus||''} ${e.time||''}</div>
+          </div>${tag}
+        </div>`;
+      }).join('')
+    : emptyState('No upcoming events','📅','+ Add Event',"openAdd('Events')");
 }
 
 // ─── PLANNER ──────────────────────────────────────────────────────────────────
@@ -618,11 +700,15 @@ function renderCalendar() {
     const isToday  = new Date(y, m, day).toDateString() === today.toDateString();
     const dayEvs   = allEvents.filter(e => e.date === dateStr);
 
+    const typeIcon = {task:'✓',shoot:'🎬',event:'📅',leave:'🌿',mission:'⚡',dayoff:'🌙',ical:''};
     html += `<div class="cal-cell ${isToday?'today':''}" onclick="showCalDay('${dateStr}')">
       <span class="cal-d">${day}</span>
-      ${dayEvs.slice(0,3).map(e =>
-        `<div class="cal-ev" style="background:${e._color}22;border-left-color:${e._color};color:${e._color}">${truncate(e.title,18)}</div>`
-      ).join('')}
+      <div class="cal-add-btn" onclick="event.stopPropagation();openAddOnDate('Events','${dateStr}')">+</div>
+      ${dayEvs.slice(0,3).map(e => {
+        const icon = typeIcon[e._type] || '';
+        const time = e.time ? `<span style="opacity:.7">${e.time.slice(0,5)} </span>` : '';
+        return `<div class="cal-ev" style="background:${e._color}22;border-left-color:${e._color};color:${e._color}">${time}${icon?icon+' ':''}${truncate(e.title,15)}</div>`;
+      }).join('')}
       ${dayEvs.length > 3 ? `<div class="cal-more">+${dayEvs.length-3} more</div>` : ''}
     </div>`;
   }
@@ -658,6 +744,15 @@ function calPrev()  { calDate.setMonth(calDate.getMonth()-1); renderCalendar(); 
 function calNext()  { calDate.setMonth(calDate.getMonth()+1); renderCalendar(); }
 function calToday() { calDate = new Date(); renderCalendar(); }
 
+function openAddOnDate(entity, dateStr) {
+  openAdd(entity);
+  // Pre-fill date field after drawer opens
+  setTimeout(() => {
+    const df = document.querySelector('#dr-body [name="date"], #dr-body [name="start_date"]');
+    if (df) df.value = dateStr;
+  }, 50);
+}
+
 function showCalDay(dateStr) {
   const items = [
     ...DB.Events.filter(e=>e.date===dateStr).map(e=>({...e,_color:'#64748B',_type:'Event'})),
@@ -670,17 +765,25 @@ function showCalDay(dateStr) {
   if (!detail) return;
   if (!items.length) { detail.style.display='none'; return; }
   detail.style.display='block';
+  const sheetFor = { Event:'Events', Task:'Tasks', Shoot:'Shoots', Leave:'Leave_Requests', Mission:'Missions' };
   detail.innerHTML = `<div class="card">
-    <div class="card-hd"><span class="card-title">📅 ${fmtDate(dateStr,{weekday:'long',month:'long',day:'numeric'})}</span></div>
+    <div class="card-hd">
+      <span class="card-title">📅 ${fmtDate(dateStr,{weekday:'long',month:'long',day:'numeric'})}</span>
+      <button class="btn btn-sm btn-primary" onclick="openAddOnDate('Events','${dateStr}')">+ Event</button>
+    </div>
     <div class="card-body">
-      ${items.map(e=>`
-        <div style="display:flex;align-items:center;gap:10px;padding:8px 0;border-bottom:1px solid var(--border-s)">
+      ${items.map(e => {
+        const sheet = sheetFor[e._type];
+        return `<div style="display:flex;align-items:center;gap:10px;padding:8px 0;border-bottom:1px solid var(--border-s);cursor:${sheet?'pointer':'default'}"
+          ${sheet?`onclick="openEdit('${sheet}','${e.id}')"`:''}>
           <div style="width:8px;height:8px;border-radius:50%;background:${e._color};flex-shrink:0"></div>
-          <div style="flex:1">
-            <div style="font-size:13px;font-weight:600">${e.title}</div>
-            <div style="font-size:11px;color:var(--ct)">${e._type} · ${e.time||e.campus||e.assignee_name||''}</div>
+          <div style="flex:1;min-width:0">
+            <div style="font-size:13px;font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(e.title)}</div>
+            <div style="font-size:11px;color:var(--ct)">${e._type}${e.time?' · '+e.time:''}${e.campus?' · '+e.campus:''}</div>
           </div>
-        </div>`).join('')}
+          ${sheet?'<svg viewBox="0 0 24 24" style="width:12px;height:12px;stroke:var(--ct);fill:none;stroke-width:2;flex-shrink:0"><polyline points="9 18 15 12 9 6"/></svg>':''}
+        </div>`;
+      }).join('')}
     </div>
   </div>`;
 }
@@ -694,10 +797,26 @@ function renderTasks() {
       DB.Departments.map(d => `<option value="${d.slug}" ${taskFilterDept===d.slug?'selected':''}>${d.name}</option>`).join('');
   }
 
-  const search = (document.getElementById('task-search')?.value || '').toLowerCase();
-  const tasks  = DB.Tasks.filter(t => {
+  // Dept dropdown
+  const deptSel2 = document.getElementById('task-dept');
+  if (deptSel2 && DB.Departments.length && deptSel2.options.length <= 1) {
+    deptSel2.innerHTML = '<option value="">All Departments</option>' +
+      DB.Departments.map(d=>`<option value="${d.slug}">${d.name}</option>`).join('');
+    deptSel2.onchange = () => { taskFilterDept = deptSel2.value; renderTasks(); };
+  }
+  // Quick-add assignee
+  const qaSel = document.getElementById('quick-assignee');
+  if (qaSel && DB.Members.length && qaSel.options.length <= 1) {
+    qaSel.innerHTML = '<option value="">Assign…</option>' +
+      DB.Members.map(m=>`<option value="${esc(m.full_name)}">${esc(m.full_name)}</option>`).join('');
+  }
+
+  const search      = (document.getElementById('task-search')?.value || '').toLowerCase();
+  const currentUser = localStorage.getItem('ais_current_user') || '';
+  const tasks = DB.Tasks.filter(t => {
     if (taskFilterStatus !== 'all' && t.status !== taskFilterStatus) return false;
     if (taskFilterDept   && t.department !== taskFilterDept)          return false;
+    if (taskViewMode === 'mine' && currentUser && t.assignee_name !== currentUser) return false;
     if (search && !t.title.toLowerCase().includes(search) && !(t.assignee_name||'').toLowerCase().includes(search)) return false;
     return true;
   });
@@ -705,33 +824,55 @@ function renderTasks() {
   const open  = DB.Tasks.filter(t => t.status !== 'done').length;
   const total = DB.Tasks.length;
   const subEl = document.getElementById('tasks-sub');
-  if (subEl) subEl.textContent = `${open} open · ${total} total`;
+  if (subEl) subEl.textContent = `${tasks.length} shown · ${open} open · ${total} total`;
 
-  // Badge
   const badge = document.getElementById('badge-tasks');
   if (badge) { badge.textContent = open; badge.style.display = open ? 'inline' : 'none'; }
 
   const listEl = document.getElementById('tasks-list');
   if (!listEl) return;
+  if (!tasks.length) { listEl.innerHTML = emptyState('No tasks match your filters','📋','+ Add Task',"openAdd('Tasks')"); return; }
 
   if (taskFilterStatus !== 'all') {
-    listEl.innerHTML = tasks.length ? tasks.map(taskRowHTML).join('') : emptyState('No tasks found');
+    listEl.innerHTML = tasks.map(taskRowHTML).join('');
     return;
   }
 
-  const order  = ['todo','in_progress','in_review','blocked','done'];
-  const labels = { todo:'To Do', in_progress:'In Progress', in_review:'In Review', blocked:'Blocked', done:'Done' };
-  const groups = {};
-  order.forEach(s => { groups[s] = []; });
-  tasks.forEach(t => { const s = t.status||'todo'; (groups[s] = groups[s]||[]).push(t); });
-
-  listEl.innerHTML = order.map(s => {
-    if (!groups[s].length) return '';
-    return `<div class="task-section-hd">
-      <span style="color:${statusColor(s)}">${labels[s]}</span>
-      <span class="tcount">${groups[s].length}</span>
-    </div>` + groups[s].map(taskRowHTML).join('');
-  }).join('') || emptyState('No tasks found');
+  if (groupByMode === 'assignee') {
+    const names = [...new Set(tasks.map(t => t.assignee_name || 'Unassigned'))].sort();
+    listEl.innerHTML = names.map(name => {
+      const mt = tasks.filter(t => (t.assignee_name||'Unassigned') === name);
+      return `<div class="gh">${av(name,'sm')}<span>${name}</span><span class="gc">${mt.length}</span></div>` + mt.map(taskRowHTML).join('');
+    }).join('');
+  } else if (groupByMode === 'due') {
+    const buckets = [
+      { label:'Overdue',        fn: t => t.due_date && daysUntil(t.due_date) < 0 },
+      { label:'Due Today',      fn: t => t.due_date && daysUntil(t.due_date) === 0 },
+      { label:'This Week',      fn: t => t.due_date && daysUntil(t.due_date) > 0 && daysUntil(t.due_date) <= 7 },
+      { label:'Later / No Date',fn: t => !t.due_date || daysUntil(t.due_date) > 7 },
+    ];
+    listEl.innerHTML = buckets.map(b => {
+      const bt = tasks.filter(b.fn);
+      if (!bt.length) return '';
+      return `<div class="gh"><span>${b.label}</span><span class="gc">${bt.length}</span></div>` + bt.map(taskRowHTML).join('');
+    }).join('');
+  } else if (groupByMode === 'dept') {
+    const depts = [...new Set(tasks.map(t => t.department || ''))];
+    listEl.innerHTML = depts.map(dept => {
+      const dt = tasks.filter(t => (t.department||'') === dept);
+      return `<div class="gh"><span style="color:${deptColor(dept)}">${deptName(dept)}</span><span class="gc">${dt.length}</span></div>` + dt.map(taskRowHTML).join('');
+    }).join('');
+  } else {
+    const order  = ['todo','in_progress','in_review','blocked','done'];
+    const labels = { todo:'To Do', in_progress:'In Progress', in_review:'In Review', blocked:'Blocked', done:'Done' };
+    const groups = {};
+    order.forEach(s => { groups[s] = []; });
+    tasks.forEach(t => { const s = t.status||'todo'; (groups[s]=groups[s]||[]).push(t); });
+    listEl.innerHTML = order.map(s => {
+      if (!groups[s].length) return '';
+      return `<div class="task-section-hd"><span style="color:${statusColor(s)}">${labels[s]}</span><span class="tcount">${groups[s].length}</span></div>` + groups[s].map(taskRowHTML).join('');
+    }).join('');
+  }
 }
 
 function taskRowHTML(t) {
@@ -898,7 +1039,7 @@ function renderCampaigns() {
           ${c.budget ? `<span style="margin-left:auto;font-weight:700;color:var(--accent)">$${Number(c.budget).toLocaleString()}</span>` : ''}
         </div>
       </div>`).join('')
-    : emptyState('No campaigns found');
+    : emptyState('No campaigns found','🚀','+ New Campaign',"openAdd('Campaigns')");
 }
 
 // ─── MEDIA ────────────────────────────────────────────────────────────────────
@@ -915,23 +1056,32 @@ function renderMedia() {
     const el = document.getElementById('shoots-list');
     if (!el) return;
     const shoots = [...DB.Shoots].sort((a,b) => (a.date||'').localeCompare(b.date||''));
-    if (!shoots.length) { el.innerHTML = emptyState('No shoots yet — click + Schedule Shoot'); return; }
+    if (!shoots.length) { el.innerHTML = emptyState('No shoots scheduled yet','🎬','+ Schedule Shoot',"openAdd('Shoots')"); return; }
 
     const SC = { scheduled:'#3B82F6', in_progress:'#F59E0B', wrapped:'#22C55E', cancelled:'#6B7280' };
     el.innerHTML = shoots.map(s => {
-      const col    = SC[s.status||'scheduled'] || '#3B82F6';
-      const assets = DB.Media_Assets.filter(a => a.shoot_id === s.id);
-      const isWrap = s.status === 'wrapped';
+      const col       = SC[s.status||'scheduled'] || '#3B82F6';
+      const assets    = DB.Media_Assets.filter(a => a.shoot_id === s.id);
+      const isWrap    = s.status === 'wrapped';
+      const countdown = daysUntil(s.date);
+      const cdLabel   = countdown === null ? '' : countdown < 0 ? 'Past' : countdown === 0 ? 'Today!' : `in ${countdown}d`;
+      const cdColor   = countdown === 0 ? 'var(--red)' : countdown <= 3 ? 'var(--amber)' : 'var(--ct)';
       return `<div class="shoot-card" onclick="openEdit('Shoots','${s.id}')">
         <div class="shoot-bar" style="background:${col}"></div>
         <div class="shoot-body">
           <div class="shoot-row">
-            <div>
-              <div class="shoot-title">🎬 ${esc(s.title)}</div>
-              <div class="shoot-meta">
-                ${fmtDate(s.date)}${s.start_time?` · ${s.start_time}–${s.end_time||'?'}`:''}${s.campus?` · ${s.campus}`:''}${s.director?` · ${s.director.split(' ')[0]}`:''}${s.location?` · 📍${esc(s.location)}`:''}
+            <div style="flex:1;min-width:0">
+              <div class="shoot-title" style="display:flex;align-items:center;gap:8px">
+                🎬 ${esc(s.title)}
+                ${cdLabel?`<span class="shoot-countdown" style="background:${cdColor}22;color:${cdColor}">${cdLabel}</span>`:''}
               </div>
-              ${assets.length ? `<div style="font-size:10px;color:var(--accent);margin-top:3px">📦 ${assets.length} asset${assets.length!==1?'s':''} in pool</div>` : ''}
+              <div class="shoot-meta">
+                ${fmtDate(s.date)}${s.start_time?` · ${s.start_time}–${s.end_time||'?'}`:''}${s.campus?` · ${s.campus}`:''}${s.location?` · 📍${esc(s.location)}`:''}
+              </div>
+              <div style="display:flex;align-items:center;gap:8px;margin-top:6px;flex-wrap:wrap">
+                ${s.director ? av(s.director,'sm') + `<span style="font-size:11px;color:var(--ct)">${esc(s.director.split(' ')[0])}</span>` : ''}
+                ${assets.length ? `<span style="font-size:10px;color:var(--accent);background:var(--accent-soft);padding:2px 7px;border-radius:8px">📦 ${assets.length} asset${assets.length!==1?'s':''}</span>` : ''}
+              </div>
             </div>
             <div style="display:flex;align-items:center;gap:8px;flex-shrink:0">
               ${pill(s.status||'scheduled')}
@@ -953,15 +1103,18 @@ function renderMedia() {
     });
     const el = document.getElementById('pool-grid');
     if (!el) return;
-    if (!assets.length) { el.innerHTML = emptyState('Content pool is empty'); return; }
+    if (!assets.length) { el.innerHTML = emptyState('Content pool is empty','📦','Wrap a shoot to add assets'); return; }
 
+    const TYPE_BG = { video:'#3B82F620', photo:'#22C55E20', reel:'#EC489920', broll:'#F59E0B20', story:'#A855F720', graphic:'#14B8A620' };
     el.innerHTML = assets.map(a => {
       const days     = a.created_at ? Math.floor((Date.now()-new Date(a.created_at))/86400000) : 0;
       const ageColor = days > 14 ? 'var(--red)' : days > 7 ? 'var(--amber)' : 'var(--ct)';
       const isReady  = a.status === 'ready';
+      const bg       = TYPE_BG[a.type||'video'] || 'var(--bg-subtle)';
       return `<div class="pool-card" onclick="openEdit('Media_Assets','${a.id}')">
+        <div class="pool-thumb" style="background:${bg}">${TYPE_ICONS[a.type||'video']||'📦'}</div>
         <div class="pool-top">
-          <span class="pool-type">${TYPE_ICONS[a.type||'video']||'📦'} ${a.type||'—'}</span>
+          <span class="pool-type" style="text-transform:capitalize">${a.type||'—'}</span>
           ${pill(a.status)}
         </div>
         <div class="pool-title">${esc(a.title)}</div>
@@ -1110,6 +1263,30 @@ function renderEvents() {
 
 // ─── PEOPLE ───────────────────────────────────────────────────────────────────
 function renderPeople() {
+  // ── Attendance strip ─────────────────────────────────────────
+  const today     = new Date().toISOString().slice(0,10);
+  const onLeave   = DB.Leave_Requests.filter(r => r.start_date <= today && r.end_date >= today);
+  const onMission = DB.Missions.filter(r => r.mission_date === today);
+  const onDayOff  = DB.Comp_Days.filter(r => r.comp_date === today);
+  const out       = onLeave.length + onMission.length + onDayOff.length;
+  const present   = Math.max(0, DB.Members.length - out);
+  const dateEl    = document.getElementById('att-date-lbl');
+  if (dateEl) dateEl.textContent = new Date().toLocaleDateString('en', { weekday:'long', month:'long', day:'numeric' });
+  const set = (id, v) => { const el = document.getElementById(id); if (el) el.textContent = v; };
+  set('att-n-present', present);
+  set('att-n-leave',   onLeave.length);
+  set('att-n-mission', onMission.length);
+  set('att-n-dayoff',  onDayOff.length);
+  const pendingEl = document.getElementById('att-pending-lbl');
+  if (pendingEl) {
+    const pending = DB.Leave_Requests.filter(r => r.status === 'pending').length;
+    pendingEl.style.display = pending ? '' : 'none';
+    pendingEl.textContent   = pending ? `⚠️ ${pending} pending approval` : '';
+    pendingEl.style.color   = 'var(--amber)'; pendingEl.style.fontWeight = '600'; pendingEl.style.fontSize = '11px';
+  }
+  // ── Week calendar ─────────────────────────────────────────────
+  renderPeopleWeekCal();
+
   const search = (document.getElementById('ppl-search')?.value || '').toLowerCase();
   const leave   = DB.Leave_Requests.map(d => ({ kind:'leave',   data:d }));
   const mission = DB.Missions.map(d => {
@@ -1158,6 +1335,46 @@ function renderPeople() {
         </tr>`;
       }).join('')
     : '<tr><td colspan="7" class="t-empty">No records found</td></tr>';
+}
+
+function renderPeopleWeekCal() {
+  const el = document.getElementById('ppl-week-cal');
+  if (!el) return;
+  const today     = new Date();
+  const todayStr  = today.toISOString().slice(0,10);
+  const dayOfWeek = today.getDay();
+  const monday    = new Date(today);
+  monday.setDate(today.getDate() - ((dayOfWeek + 6) % 7));
+  const days = [];
+  for (let i = 0; i < 7; i++) {
+    const d = new Date(monday);
+    d.setDate(monday.getDate() + i);
+    days.push({ str: d.toISOString().slice(0,10), date: d });
+  }
+  const members = DB.Members.slice(0, 12);
+  if (!members.length) { el.innerHTML = ''; return; }
+  let html = '<table class="wc-table"><thead><tr><th class="wc-th">Member</th>';
+  days.forEach(({ str, date }) => {
+    const isToday = str === todayStr;
+    html += `<th class="wc-th${isToday?' wc-today-col':''}">${date.toLocaleDateString('en',{weekday:'short'})}<br><span style="font-weight:400">${date.getDate()}</span></th>`;
+  });
+  html += '</tr></thead><tbody>';
+  members.forEach(m => {
+    html += `<tr class="wc-tr"><td class="wc-td" style="font-size:12px;font-weight:600;white-space:nowrap">${esc(m.full_name.split(' ')[0])}</td>`;
+    days.forEach(({ str }) => {
+      const isToday   = str === todayStr;
+      const onLeave   = DB.Leave_Requests.some(r => r.member_name===m.full_name && r.start_date<=str && r.end_date>=str);
+      const onMission = DB.Missions.some(r => r.member_name===m.full_name && r.mission_date===str);
+      const onDayOff  = DB.Comp_Days.some(r => r.member_name===m.full_name && r.comp_date===str);
+      const badge = onLeave ? '<span class="wc-badge wc-l">L</span>'
+                  : onMission ? '<span class="wc-badge wc-m">M</span>'
+                  : onDayOff  ? '<span class="wc-badge wc-d">D</span>' : '';
+      html += `<td class="wc-td${isToday?' wc-today-col':''}" style="text-align:center">${badge}</td>`;
+    });
+    html += '</tr>';
+  });
+  html += '</tbody></table>';
+  el.innerHTML = html;
 }
 
 function compExpiryHTML(comp) {
@@ -1414,7 +1631,7 @@ async function addTaskComment(taskId) {
   if (!body) return;
   await dbAppend('Task_Comments', {
     task_id:     taskId,
-    author_name: DB.Members[0]?.full_name || 'Me',
+    author_name: localStorage.getItem('ais_current_user') || DB.Members[0]?.full_name || 'Me',
     body,
     created_at:  new Date().toISOString(),
   });
@@ -1745,6 +1962,14 @@ function renderAdmin() {
   const urlEl = document.getElementById('settings-url');
   if (urlEl && CONFIG.SCRIPT_URL) urlEl.value = CONFIG.SCRIPT_URL;
 
+  // Current user dropdown
+  const userSel = document.getElementById('current-user-sel');
+  if (userSel) {
+    const currentUser = localStorage.getItem('ais_current_user') || '';
+    userSel.innerHTML = '<option value="">— Select your name —</option>' +
+      DB.Members.map(m => `<option value="${esc(m.full_name)}" ${currentUser===m.full_name?'selected':''}>${esc(m.full_name)}</option>`).join('');
+  }
+
   // Goals
   renderGoals();
   // iCal Feeds
@@ -1764,50 +1989,125 @@ function saveSettings() {
 
 // ─── DRAWER ───────────────────────────────────────────────────────────────────
 const FORMS = {
-  Tasks: (item={}) => `
-    <div class="fg"><label class="fl">Title *</label><input class="fi" name="title" value="${esc(item.title)}" placeholder="Task title…"/></div>
-    <div class="fr">
-      <div class="fg"><label class="fl">Status</label><select class="fs" name="status">
-        ${CONFIG.TASK_STATUSES.map(s=>`<option value="${s}" ${item.status===s?'selected':''}>${s.replace(/_/g,' ')}</option>`).join('')}
-      </select></div>
-      <div class="fg"><label class="fl">Priority</label><select class="fs" name="priority">
-        ${CONFIG.PRIORITIES.map(p=>`<option value="${p}" ${item.priority===p?'selected':''}>${p}</option>`).join('')}
-      </select></div>
+  Tasks: (item={}) => {
+    const isEdit  = !!item.id;
+    const curSt   = item.status   || 'todo';
+    const curPri  = item.priority || 'medium';
+    const stLabels  = { todo:'To Do', in_progress:'In Progress', in_review:'In Review', done:'Done', blocked:'Blocked' };
+    const priLabels = { low:'Low', medium:'Medium', high:'High', critical:'Critical' };
+    const statusPills = CONFIG.TASK_STATUSES.map(s => {
+      const cls = {in_progress:'ip',in_review:'ir'}[s]||s;
+      return `<button type="button" class="pill p-${cls} pill-sel${curSt===s?' active':''}" data-val="${s}" data-field="status"
+        onclick="selectTaskPill(this,'status','${item.id||''}')">${stLabels[s]||s}</button>`;
+    }).join('');
+    const priPills = CONFIG.PRIORITIES.map(p =>
+      `<button type="button" class="pill p-${p} pill-sel${curPri===p?' active':''}" data-val="${p}" data-field="priority"
+        onclick="selectTaskPill(this,'priority','${item.id||''}')">${priLabels[p]||p}</button>`
+    ).join('');
+    const sub = isEdit ? DB.Subtasks.filter(s=>s.task_id===item.id) : [];
+    return `
+    <!-- Hidden inputs so saveDrawer() still reads them -->
+    <input type="hidden" name="status"   value="${curSt}"/>
+    <input type="hidden" name="priority" value="${curPri}"/>
+
+    <!-- Title -->
+    <input class="td-title-input" name="title" value="${esc(item.title)}" placeholder="Task title…"
+      ${isEdit?`onblur="quickUpdateTask('${item.id}','title',this.value)"`:''}/>
+
+    <!-- Status -->
+    <div class="td-section">
+      <div class="td-lbl">Status</div>
+      <div class="pill-row">${statusPills}</div>
     </div>
-    <div class="fr">
-      <div class="fg"><label class="fl">Department</label><select class="fs" name="department">
-        <option value="">— Select —</option>
-        ${DB.Departments.map(d=>`<option value="${d.slug}" ${item.department===d.slug?'selected':''}>${d.name}</option>`).join('')}
-      </select></div>
-      <div class="fg"><label class="fl">Campus</label><select class="fs" name="campus">
-        <option value="">All</option>${CONFIG.CAMPUSES.map(c=>`<option ${item.campus===c?'selected':''}>${c}</option>`).join('')}
-      </select></div>
+
+    <!-- Priority -->
+    <div class="td-section">
+      <div class="td-lbl">Priority</div>
+      <div class="pill-row">${priPills}</div>
     </div>
-    <div class="fr">
-      <div class="fg"><label class="fl">Assignee</label><select class="fs" name="assignee_name">
-        <option value="">— Unassigned —</option>
-        ${DB.Members.map(m=>`<option value="${m.full_name}" ${item.assignee_name===m.full_name?'selected':''}>${m.full_name}</option>`).join('')}
-      </select></div>
-      <div class="fg"><label class="fl">Due Date</label><input class="fi" type="date" name="due_date" value="${item.due_date||''}"/></div>
+
+    <!-- Meta fields -->
+    <div class="td-section">
+      <div class="td-meta-row">
+        <span class="td-meta-key">👤 Assignee</span>
+        <div class="td-meta-val">
+          <select class="fs" name="assignee_name" ${isEdit?`onchange="quickUpdateTask('${item.id}','assignee_name',this.value)"`:''}>
+            <option value="">— Unassigned —</option>
+            ${DB.Members.map(m=>`<option value="${m.full_name}" ${item.assignee_name===m.full_name?'selected':''}>${m.full_name}</option>`).join('')}
+          </select>
+        </div>
+      </div>
+      <div class="td-meta-row">
+        <span class="td-meta-key">📅 Due Date</span>
+        <div class="td-meta-val">
+          <input class="fi" type="date" name="due_date" value="${item.due_date||''}"
+            ${isEdit?`onchange="quickUpdateTask('${item.id}','due_date',this.value)"`:''}/>
+        </div>
+      </div>
+      <div class="td-meta-row">
+        <span class="td-meta-key">🏢 Department</span>
+        <div class="td-meta-val">
+          <select class="fs" name="department" ${isEdit?`onchange="quickUpdateTask('${item.id}','department',this.value)"`:''}>
+            <option value="">—</option>
+            ${DB.Departments.map(d=>`<option value="${d.slug}" ${item.department===d.slug?'selected':''}>${d.name}</option>`).join('')}
+          </select>
+        </div>
+      </div>
+      <div class="td-meta-row">
+        <span class="td-meta-key">🏫 Campus</span>
+        <div class="td-meta-val">
+          <select class="fs" name="campus" ${isEdit?`onchange="quickUpdateTask('${item.id}','campus',this.value)"`:''}>
+            <option value="">All</option>${CONFIG.CAMPUSES.map(c=>`<option ${item.campus===c?'selected':''}>${c}</option>`).join('')}
+          </select>
+        </div>
+      </div>
+      <div class="td-meta-row">
+        <span class="td-meta-key">⏱ Est. Hours</span>
+        <div class="td-meta-val">
+          <input class="fi" type="number" step="0.5" min="0" name="estimated_hours" value="${item.estimated_hours||''}" placeholder="e.g. 2.5"
+            ${isEdit?`onblur="quickUpdateTask('${item.id}','estimated_hours',this.value)"`:''}/>
+        </div>
+      </div>
     </div>
-    <div class="fr">
-      <div class="fg"><label class="fl">Recurrence</label><select class="fs" name="recurrence">
-        ${['none','daily','weekly','monthly'].map(r=>`<option value="${r}" ${(item.recurrence||'none')===r?'selected':''}>${r.charAt(0).toUpperCase()+r.slice(1)}</option>`).join('')}
-      </select></div>
-      <div class="fg"><label class="fl">Est. Hours</label><input class="fi" type="number" step="0.5" min="0" name="estimated_hours" value="${item.estimated_hours||''}" placeholder="e.g. 2.5"/></div>
+
+    <!-- Description -->
+    <div class="td-section">
+      <div class="td-lbl">Description</div>
+      <textarea class="fta" name="description" placeholder="Add more context…"
+        ${isEdit?`onblur="quickUpdateTask('${item.id}','description',this.value)"`:''} rows="3">${esc(item.description)}</textarea>
     </div>
-    <div class="fg"><label class="fl">Description</label><textarea class="fta" name="description">${esc(item.description)}</textarea></div>
-    <div class="fg"><label class="fl">Tags</label><input class="fi" name="tags" value="${esc(item.tags)}" placeholder="design, urgent…"/></div>
-    ${item.id ? `
-    <div style="margin-top:16px;border-top:1px solid var(--border-s);padding-top:14px">
-      <div style="font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.07em;color:var(--ct);margin-bottom:10px">Comments</div>
+
+    <!-- Tags -->
+    <div class="td-section">
+      <div class="td-lbl">Tags</div>
+      <input class="fi" name="tags" value="${esc(item.tags)}" placeholder="design, urgent…"
+        ${isEdit?`onblur="quickUpdateTask('${item.id}','tags',this.value)"`:''}/>
+    </div>
+
+    ${isEdit ? `
+    <!-- Subtasks -->
+    <div class="td-section">
+      <div class="td-lbl">Subtasks <span class="gc" style="margin-left:4px">${sub.filter(s=>s.done==='true'||s.done===true).length}/${sub.length}</span></div>
+      ${subtaskSectionHTML(item.id, sub)}
+    </div>
+
+    <!-- Comments -->
+    <div class="td-section">
+      <div class="td-lbl">Comments</div>
       <div id="task-comments-list">${renderTaskCommentsHTML(item.id)}</div>
       <div style="display:flex;gap:8px;margin-top:10px">
         <input class="fi" id="new-comment-input" placeholder="Add a comment…" style="flex:1"
           onkeydown="if(event.key==='Enter')addTaskComment('${item.id}')"/>
         <button class="btn btn-sm btn-primary" onclick="addTaskComment('${item.id}')">Post</button>
       </div>
-    </div>` : ''}`,
+    </div>
+
+    <!-- Delete -->
+    <div class="td-section" style="padding-top:4px">
+      <button class="task-del-btn" onclick="event.stopPropagation();confirmDelete('Tasks','${item.id}')">🗑 Delete Task</button>
+    </div>
+    ` : ''}`;
+  },
 
   Campaigns: (item={}) => `
     <div class="fg"><label class="fl">Campaign Name *</label><input class="fi" name="title" value="${esc(item.title)}" placeholder="Campaign name…"/></div>
@@ -2073,22 +2373,39 @@ function openEdit(sheet, id) {
   drawerEntity = sheet;
   drawerItem   = item;
   const labels = { Leave_Requests:'Leave Request', Comp_Days:'Day Off', Social_Metrics:'Social Metrics', Media_Assets:'Media Asset' };
-  document.getElementById('dr-title').textContent = `Edit ${labels[sheet] || sheet.replace(/_/g,' ')}`;
+  const isTask = sheet === 'Tasks';
+  document.getElementById('dr-title').textContent = isTask ? (item.title || 'Task') : `Edit ${labels[sheet] || sheet.replace(/_/g,' ')}`;
   document.getElementById('dr-body').innerHTML    = (FORMS[sheet]||(() => ''))(item);
-  openDrawer();
+  openDrawer(isTask);
 }
 
 // Legacy alias
 function openEditDrawer(sheet, id) { openEdit(sheet, id); }
 
-function openDrawer() {
-  document.getElementById('drawer').classList.add('open');
-  document.getElementById('dr-ov').classList.add('open');
+function openDrawer(isTask=false) {
+  const drawer  = document.getElementById('drawer');
+  const overlay = document.getElementById('dr-ov');
+  const content = document.getElementById('content');
+  drawer.classList.add('open');
+  overlay.classList.add('open');
+  if (isTask) {
+    drawer.classList.add('drawer-task');
+    overlay.classList.add('overlay-off');
+    content.classList.add('drawer-open');
+  } else {
+    drawer.classList.remove('drawer-task');
+    overlay.classList.remove('overlay-off');
+    content.classList.remove('drawer-open');
+  }
 }
 
 function closeDrawer() {
-  document.getElementById('drawer').classList.remove('open');
-  document.getElementById('dr-ov').classList.remove('open');
+  const drawer  = document.getElementById('drawer');
+  const overlay = document.getElementById('dr-ov');
+  const content = document.getElementById('content');
+  drawer.classList.remove('open','drawer-task');
+  overlay.classList.remove('open','overlay-off');
+  content.classList.remove('drawer-open');
   drawerEntity = null;
   drawerItem   = null;
 }

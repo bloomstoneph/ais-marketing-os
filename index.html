@@ -561,6 +561,48 @@ tbody tr:hover{background:rgba(255,255,255,.03)}
 .wc-m{background:var(--amber-soft);color:var(--amber)}
 .wc-d{background:var(--accent-soft);color:#60A5FA}
 
+/* ── Empty states ────────────────────────────────────────────── */
+.empty-state{padding:48px 24px;text-align:center;display:flex;flex-direction:column;align-items:center;gap:12px}
+.empty-icon{font-size:36px;opacity:.5;line-height:1}
+.empty-msg{font-size:13px;color:var(--ct);max-width:240px;line-height:1.6}
+
+/* ── Task detail panel (Asana-style) ─────────────────────────── */
+#drawer.drawer-task{width:560px}
+#content.drawer-open{margin-right:560px;transition:margin-right .25s cubic-bezier(.25,.46,.45,.94)}
+#dr-ov.overlay-off{background:transparent!important;pointer-events:none}
+.td-title-input{font-size:18px;font-weight:700;color:var(--cp);background:transparent;border:none;outline:none;width:100%;font-family:inherit;line-height:1.4;padding:4px 0 6px;border-bottom:2px solid transparent;transition:border-color .15s;display:block;margin-bottom:14px}
+.td-title-input:focus{border-bottom-color:var(--accent)}
+.td-section{margin-bottom:16px;padding-bottom:16px;border-bottom:1px solid var(--border-s)}
+.td-section:last-child{border-bottom:none;margin-bottom:0;padding-bottom:0}
+.td-lbl{font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.08em;color:var(--ct);margin-bottom:8px}
+.td-meta-row{display:flex;align-items:center;gap:10px;padding:5px 0;border-bottom:1px solid var(--border-s)}
+.td-meta-row:last-child{border-bottom:none}
+.td-meta-key{font-size:12px;color:var(--ct);width:88px;flex-shrink:0;display:flex;align-items:center;gap:5px}
+.td-meta-val{flex:1;min-width:0}
+.td-meta-val .fs,.td-meta-val .fi{background:transparent;border:1px solid transparent;padding:3px 7px;font-size:12px;height:auto;border-radius:6px;width:100%}
+.td-meta-val .fs:hover,.td-meta-val .fi:hover{border-color:var(--border-d);background:var(--bg-input)}
+.td-meta-val .fs:focus,.td-meta-val .fi:focus{border-color:var(--accent);background:var(--bg-input)}
+.pill-row{display:flex;gap:6px;flex-wrap:wrap}
+.pill-sel{cursor:pointer;transition:all .12s;border:2px solid transparent;background:none;font-family:inherit}
+.pill-sel.active{box-shadow:0 0 0 2px var(--accent)}
+.pill-sel:not(.active){opacity:.45}
+.pill-sel:hover{opacity:.8}
+.task-del-btn{margin-left:auto;color:var(--red);background:transparent;border:1px solid var(--red-soft);border-radius:7px;padding:3px 10px;font-size:11px;cursor:pointer;transition:all .12s;font-weight:600}
+.task-del-btn:hover{background:var(--red);color:#fff;border-color:var(--red)}
+
+/* ── Calendar: hover add button ──────────────────────────────── */
+.cal-add-btn{position:absolute;top:3px;right:3px;opacity:0;transition:opacity .1s;font-size:12px;line-height:1;color:var(--accent);cursor:pointer;width:18px;height:18px;display:flex;align-items:center;justify-content:center;border-radius:4px;background:var(--accent-soft);font-weight:700}
+.cal-cell:hover .cal-add-btn{opacity:1}
+
+/* ── Pool card thumbnail ──────────────────────────────────────── */
+.pool-thumb{height:56px;border-radius:8px;display:flex;align-items:center;justify-content:center;font-size:24px;margin-bottom:4px;flex-shrink:0}
+
+/* ── Shoot countdown badge ───────────────────────────────────── */
+.shoot-countdown{font-size:10px;font-weight:700;padding:2px 7px;border-radius:8px;flex-shrink:0}
+
+/* ── Sidebar active fill ─────────────────────────────────────── */
+.sb-item.active{background:var(--bg-subtle)!important}
+
 /* ── Responsive ──────────────────────────────────────────────── */
 @media(max-width:768px){
   #sidebar{position:fixed;top:0;left:0;height:100%;transform:translateX(-100%);z-index:40;width:var(--sidebar-w)!important}
@@ -693,6 +735,9 @@ tbody tr:hover{background:rgba(255,255,255,.03)}
           </div>
         </div>
       </div>
+
+      <!-- KPI grid -->
+      <div class="kpi-grid" id="dash-kpis" style="margin-bottom:16px"></div>
 
       <!-- Out Today (shown only when people are absent) -->
       <div id="dash-out-wrap" style="display:none;margin-bottom:14px">
