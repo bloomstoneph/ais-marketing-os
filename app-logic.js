@@ -434,12 +434,12 @@ function setPoolFilter(filter, el) {
   renderMedia();
 }
 
-function filterTasks()      { renderTasks(); }
+function filterTasks()      { taskFilterDept = document.getElementById('task-dept')?.value || ''; renderTasks(); }
 function filterCampaigns()  { renderCampaigns(); }
 function filterPeople()     { renderPeople(); }
 function filterSocial()     { renderSocial(); }
 function filterEnrollment() { renderEnrollment(); }
-function filterEvents()     { renderEvents(); }
+function filterEvents()     { /* events shown in calendar only */ }
 
 // ─── UTILS ────────────────────────────────────────────────────────────────────
 function pill(status) {
@@ -807,13 +807,6 @@ function renderTasks() {
       DB.Departments.map(d => `<option value="${d.slug}" ${taskFilterDept===d.slug?'selected':''}>${d.name}</option>`).join('');
   }
 
-  // Dept dropdown
-  const deptSel2 = document.getElementById('task-dept');
-  if (deptSel2 && DB.Departments.length && deptSel2.options.length <= 1) {
-    deptSel2.innerHTML = '<option value="">All Departments</option>' +
-      DB.Departments.map(d=>`<option value="${d.slug}">${d.name}</option>`).join('');
-    deptSel2.onchange = () => { taskFilterDept = deptSel2.value; renderTasks(); };
-  }
   // Quick-add assignee
   const qaSel = document.getElementById('quick-assignee');
   if (qaSel && DB.Members.length && qaSel.options.length <= 1) {
@@ -983,31 +976,6 @@ async function toggleTaskDone(id) {
   const next = t.status === 'done' ? 'todo' : 'done';
   await dbUpdate('Tasks', id, { status: next });
   toast(next === 'done' ? '✓ Task completed' : 'Task reopened', 'success');
-}
-
-// ─── MEDIA CALENDAR ───────────────────────────────────────────────────────────
-function renderMediaCal() {
-  const y = calDate.getFullYear(), m = calDate.getMonth();
-  const daysInMonth = new Date(y, m+1, 0).getDate();
-  const firstDay    = new Date(y, m, 1).getDay();
-  const startOffset = (firstDay + 6) % 7;
-
-  let html = '<div class="cal-grid" style="margin-top:12px">';
-  ['Mon','Tue','Wed','Thu','Fri','Sat','Sun'].forEach(d => { html += `<div class="cal-lbl">${d}</div>`; });
-  for (let i=0; i<startOffset; i++) html += '<div class="cal-cell other"></div>';
-  const today = new Date();
-  for (let day=1; day<=daysInMonth; day++) {
-    const dateStr = `${y}-${String(m+1).padStart(2,'0')}-${String(day).padStart(2,'0')}`;
-    const isToday = new Date(y,m,day).toDateString()===today.toDateString();
-    const shoots  = DB.Shoots.filter(s=>s.date===dateStr);
-    html += `<div class="cal-cell ${isToday?'today':''}">
-      <span class="cal-d">${day}</span>
-      ${shoots.map(s=>`<div class="cal-ev" style="background:#EC489920;border-left-color:#EC4899;color:#EC4899">🎬 ${truncate(s.title,14)}</div>`).join('')}
-    </div>`;
-  }
-  html += '</div>';
-  const el = document.getElementById('media-cal-grid');
-  if (el) el.innerHTML = html;
 }
 
 // ─── MARKETING ────────────────────────────────────────────────────────────────
@@ -1186,7 +1154,7 @@ function renderSocial() {
   // Summary cards
   const summaryEl = document.getElementById('soc-summary');
   if (summaryEl) {
-    summaryEl.innerHTML = ['facebook','instagram','tiktok','youtube'].map(p => {
+    summaryEl.innerHTML = CONFIG.PLATFORMS.map(p => {
       const latest = DB.Social_Metrics
         .filter(m=>m.platform===p)
         .sort((a,b)=>(b.period_start||'').localeCompare(a.period_start||''))[0];
@@ -1248,27 +1216,6 @@ function renderEnrollment() {
         </tr>`;
       }).join('')
     : '<tr><td colspan="8" class="t-empty">No enrollment data</td></tr>';
-}
-
-// ─── EVENTS ───────────────────────────────────────────────────────────────────
-function renderEvents() {
-  const campus = document.getElementById('ev-campus')?.value || '';
-  const events = DB.Events.filter(e => {
-    if (campus && e.campus !== campus) return false;
-    return true;
-  }).sort((a,b) => (b.date||'').localeCompare(a.date||''));
-
-  const bodyEl = document.getElementById('ev-body');
-  if (bodyEl) bodyEl.innerHTML = events.length
-    ? events.map(e => `<tr onclick="openEdit('Events','${e.id}')">
-        <td style="font-weight:600">${e.title}</td>
-        <td>${fmtDate(e.date)}</td>
-        <td>${e.time||'—'}</td>
-        <td>${e.campus||'—'}</td>
-        <td>${pill(e.status||'upcoming')}</td>
-        <td>${delBtn('Events',e.id)}</td>
-      </tr>`).join('')
-    : '<tr><td colspan="6" class="t-empty">No events found</td></tr>';
 }
 
 // ─── PEOPLE ───────────────────────────────────────────────────────────────────
@@ -1344,7 +1291,7 @@ function renderPeople() {
           <td>${delBtn(sheet,d.id)}</td>
         </tr>`;
       }).join('')
-    : '<tr><td colspan="7" class="t-empty">No records found</td></tr>';
+    : '<tr><td colspan="6" class="t-empty">No records found</td></tr>';
 }
 
 function renderPeopleWeekCal() {
@@ -1363,7 +1310,10 @@ function renderPeopleWeekCal() {
   }
   const members = DB.Members.slice(0, 12);
   if (!members.length) { el.innerHTML = ''; return; }
-  let html = '<table class="wc-table"><thead><tr><th class="wc-th">Member</th>';
+  const hiddenCount = DB.Members.length - members.length;
+  let html = '<table class="wc-table"><thead><tr><th class="wc-th">Member' +
+    (hiddenCount > 0 ? ` <span style="font-weight:400;color:var(--ct)">(+${hiddenCount} more)</span>` : '') +
+    '</th>';
   days.forEach(({ str, date }) => {
     const isToday = str === todayStr;
     html += `<th class="wc-th${isToday?' wc-today-col':''}">${date.toLocaleDateString('en',{weekday:'short'})}<br><span style="font-weight:400">${date.getDate()}</span></th>`;
@@ -1388,12 +1338,16 @@ function renderPeopleWeekCal() {
 }
 
 function compExpiryHTML(comp) {
-  if (comp.comp_date) return '<span class="pill p-done">✓ Scheduled</span>';
-  if (comp.status==='expired') return '<span class="pill" style="background:var(--red-soft);color:var(--red)">Expired</span>';
+  if (comp.status === 'expired') return '<span class="pill" style="background:var(--red-soft);color:var(--red)">Expired</span>';
+  if (comp.comp_date) {
+    const d = daysUntil(comp.comp_date);
+    if (d !== null && d < 0) return '<span class="pill p-done">✓ Used</span>';
+    return '<span class="pill p-done">✓ Scheduled</span>';
+  }
   if (!comp.expires_at) return '<span style="color:var(--ct)">—</span>';
   const d = daysUntil(comp.expires_at);
-  const color = d<=7 ? '#EF4444' : d<=21 ? '#F59E0B' : '#22C55E';
-  return `<span class="pill" style="background:${color}22;color:${color}">${d<=0?'Expired!':d+'d left'}</span>`;
+  const color = d <= 0 ? '#EF4444' : d <= 7 ? '#EF4444' : d <= 21 ? '#F59E0B' : '#22C55E';
+  return `<span class="pill" style="background:${color}22;color:${color}">${d <= 0 ? 'Expired!' : d + 'd left'}</span>`;
 }
 
 // ─── INTEL ────────────────────────────────────────────────────────────────────
@@ -1524,10 +1478,11 @@ async function pushActionItem(actionId, meetingId, silent=false) {
   const a = DB.Meeting_Actions.find(x => x.id === actionId);
   if (!a || a.pushed==='true' || a.pushed===true) return;
   const m = DB.Meetings.find(x => x.id === meetingId);
+  const member = DB.Members.find(x => x.full_name === a.assignee_name);
   const task = await dbAppend('Tasks', {
     title: a.title, assignee_name: a.assignee_name||'', due_date: a.due_date||'',
     status: 'todo', priority: 'medium', meeting_id: meetingId,
-    meeting_source: m?.title||'', department: 'social', tags: 'meeting-action',
+    meeting_source: m?.title||'', department: member?.department || '', tags: 'meeting-action',
   });
   await dbUpdate('Meeting_Actions', actionId, { pushed: 'true', task_id: task.id });
   if (!silent) { toast('Task created ✓', 'success'); showMeeting(meetingId); }
@@ -2171,7 +2126,12 @@ const FORMS = {
       <div class="fg"><label class="fl">Start Date *</label><input class="fi" type="date" name="start_date" value="${item.start_date||''}"/></div>
       <div class="fg"><label class="fl">End Date *</label><input class="fi" type="date" name="end_date" value="${item.end_date||''}"/></div>
     </div>
-    <div class="fg"><label class="fl">Days Count</label><input class="fi" type="number" name="days_count" value="${item.days_count||1}" min="0.5" step="0.5"/></div>
+    <div class="fr">
+      <div class="fg"><label class="fl">Days Count</label><input class="fi" type="number" name="days_count" value="${item.days_count||1}" min="0.5" step="0.5"/></div>
+      <div class="fg"><label class="fl">Status</label><select class="fs" name="status">
+        ${['pending','approved','rejected'].map(s=>`<option value="${s}" ${(item.status||'pending')===s?'selected':''}>${s.charAt(0).toUpperCase()+s.slice(1)}</option>`).join('')}
+      </select></div>
+    </div>
     <div class="fg"><label class="fl">Reason</label><textarea class="fta" name="reason" rows="2">${esc(item.reason)}</textarea></div>`,
 
   Missions: (item={}) => `
