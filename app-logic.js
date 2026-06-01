@@ -32,7 +32,6 @@ const GOAL_LABELS = {
   campaigns_launched: 'Campaigns Launched',
 };
 
-const ICAL_PROXY = 'https://api.allorigins.win/raw?url=';
 let iCalCache = {};
 
 let currentView      = 'dashboard';
@@ -1532,21 +1531,32 @@ function parseICS(text) {
 
 async function syncICalFeed(feedId) {
   const feed = DB.iCal_Feeds.find(f => f.id === feedId);
-  if (!feed || !feed.url) return;
+  if (!feed || !feed.url) { toast('Feed not found', 'error'); return; }
+
+  if (!CONFIG.SCRIPT_URL) {
+    toast('Add your Apps Script URL in Admin → Settings first', 'warn');
+    return;
+  }
+
   const btn = document.querySelector(`[data-sync="${feedId}"]`);
   if (btn) { btn.textContent = '⟳'; btn.disabled = true; }
+
   try {
-    const res    = await fetch(ICAL_PROXY + encodeURIComponent(feed.url));
+    // Route through Apps Script to avoid CORS
+    const proxyUrl = CONFIG.SCRIPT_URL + '?ical=' + encodeURIComponent(feed.url);
+    const res      = await fetch(proxyUrl);
+    if (!res.ok) throw new Error('HTTP ' + res.status);
     const text   = await res.text();
+    if (!text.includes('BEGIN:VCALENDAR')) throw new Error('Not a valid iCal response');
     const events = parseICS(text);
     iCalCache[feedId] = events;
     localStorage.setItem('ais_ical', JSON.stringify(iCalCache));
     await dbUpdate('iCal_Feeds', feedId, { last_synced: new Date().toISOString() });
-    toast(`✓ Synced ${events.length} events from ${feed.name}`, 'success');
+    toast(`✓ ${events.length} events synced from ${feed.name}`, 'success');
     renderCalendar();
     renderICalFeeds();
   } catch(e) {
-    toast('iCal sync failed — check the URL', 'error');
+    toast('Sync failed: ' + e.message, 'error');
   } finally {
     if (btn) { btn.textContent = '↻'; btn.disabled = false; }
   }
