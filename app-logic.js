@@ -127,7 +127,12 @@ async function fetchFromSheets() {
     const res  = await fetch(CONFIG.SCRIPT_URL + '?t=' + Date.now());
     const json = await res.json();
     if (!json.ok) throw new Error(json.error);
-    Object.keys(DB).forEach(k => { if (json.data[k]) DB[k] = json.data[k]; });
+    Object.keys(DB).forEach(k => {
+      const incoming = json.data[k];
+      if (incoming === undefined || incoming === null) return; // sheet missing — keep local
+      if (Array.isArray(incoming) && incoming.length === 0 && DB[k].length > 0) return; // remote empty but we have local data — keep local
+      DB[k] = incoming;
+    });
     saveToLS();
     renderAll();
     updateSyncTime();
