@@ -4,7 +4,7 @@
     {
       "name": "ais-pwa",
       "runtimeExecutable": "python3",
-      "runtimeArgs": ["-m", "http.server", "8081"],
+      "runtimeArgs": ["-m", "http.server", "8081", "--directory", "/Users/store/Desktop/ais-pwa/ais-marketing-os"],
       "port": 8081
     }
   ]
